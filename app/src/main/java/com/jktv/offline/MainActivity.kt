@@ -338,10 +338,13 @@ private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowse
     val currentLyric = playback.lyrics.getOrNull(displayedLyricIndex)
     val nextLyric = playback.lyrics.getOrNull(displayedLyricIndex + 1)
     val backgroundUri = library.backgroundVideoUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
+    var videoError by remember(backgroundUri?.toString()) { mutableStateOf<String?>(null) }
     ScreenColumn {
         Header("Now playing", "KARAOKE STAGE")
         Box(Modifier.fillMaxWidth().weight(1f, fill = false).height(270.dp).clip(RoundedCornerShape(28.dp)).background(Brush.verticalGradient(listOf(Card, Surface))), contentAlignment = Alignment.Center) {
-            if (backgroundUri != null) LoopingVideoBackground(backgroundUri, Modifier.fillMaxSize())
+            if (backgroundUri != null) {
+                LoopingVideoBackground(backgroundUri, Modifier.fillMaxSize()) { message -> videoError = message }
+            }
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (backgroundUri == null) 0.08f else 0.48f)))
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.padding(24.dp)) {
                 if (playback.file == null) {
@@ -355,6 +358,9 @@ private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowse
                 } else {
                     Text(currentLyric?.text ?: "♪", color = Color.White, fontSize = 27.sp, lineHeight = 35.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     if (nextLyric != null) Text(nextLyric.text, color = Color.White.copy(alpha = .78f), fontSize = 17.sp, lineHeight = 24.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 18.dp))
+                }
+                if (videoError != null) {
+                    Text(videoError.orEmpty(), color = Orange, fontSize = 12.sp, lineHeight = 17.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
                 }
             }
         }
@@ -494,7 +500,7 @@ private fun SettingsScreen(
 }
 
 @Composable
-private fun LoopingVideoBackground(uri: Uri, modifier: Modifier = Modifier) {
+private fun LoopingVideoBackground(uri: Uri, modifier: Modifier = Modifier, onError: (String) -> Unit) {
     key(uri.toString()) {
         AndroidView(
             modifier = modifier,
@@ -512,7 +518,13 @@ private fun LoopingVideoBackground(uri: Uri, modifier: Modifier = Modifier) {
                             player = mediaPlayer
                             try {
                                 mediaPlayer.setSurface(surface)
-                                mediaPlayer.setDataSource(context, uri)
+                                // Library BGVs are app-private files; pass their path directly to avoid
+                                // ContentResolver URI handling differences across Android vendors.
+                                if (uri.scheme == "file") {
+                                    mediaPlayer.setDataSource(uri.path ?: throw IllegalArgumentException("The selected video path is empty."))
+                                } else {
+                                    mediaPlayer.setDataSource(context, uri)
+                                }
                                 mediaPlayer.isLooping = true
                                 mediaPlayer.setVolume(0f, 0f)
                                 mediaPlayer.setOnVideoSizeChangedListener { _, videoWidth, videoHeight ->
@@ -522,13 +534,17 @@ private fun LoopingVideoBackground(uri: Uri, modifier: Modifier = Modifier) {
                                     applyVideoCenterCrop(this@apply, prepared.videoWidth, prepared.videoHeight)
                                     prepared.start()
                                 }
-                                mediaPlayer.setOnErrorListener { failedPlayer, _, _ ->
+                                mediaPlayer.setOnErrorListener { failedPlayer, what, extra ->
+                                    onError(if (what == MediaPlayer.MEDIA_ERROR_UNSUPPORTED) "This MP4 codec is not supported. Choose an H.264 MP4 video." else "Background video playback failed ($what/$extra). Try another MP4.")
                                     runCatching { failedPlayer.release() }
+                                    if (player === failedPlayer) player = null
                                     true
                                 }
                                 mediaPlayer.prepareAsync()
-                            } catch (_: Exception) {
+                            } catch (error: Exception) {
+                                onError(error.localizedMessage ?: "Couldn't open the selected background video.")
                                 runCatching { mediaPlayer.release() }
+                                if (player === mediaPlayer) player = null
                                 runCatching { surface.release() }
                             }
                         }
