@@ -10,7 +10,7 @@ android {
     compileSdk = 35
 
     val configuredVersionName = providers.gradleProperty("versionName").orElse("0.3.4").get()
-    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("8").get().toInt()
+    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("9").get().toInt()
     val repositoryValue = providers.gradleProperty("jktvGithubRepository")
         .orElse(providers.environmentVariable("GITHUB_REPOSITORY"))
         .orElse("hillman3948-cyber/JKTV-Offline")
@@ -66,6 +66,7 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.5")
     implementation("dev.kotlinds:fluidsynth-kmp:1.1.0")
     ksp("androidx.room:room-compiler:2.8.5")
+    testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
 

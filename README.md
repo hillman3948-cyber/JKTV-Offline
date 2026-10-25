@@ -11,6 +11,7 @@ JKTV is an Android karaoke player designed to download a MIDI/KAR library and a 
 - MIDI/KAR playback is powered on-device by FluidSynth using the installed SF2 SoundFont. Song playback, pause, seek, and timed MIDI lyrics work offline after library setup.
 - Synced lyrics can be embedded in MIDI/KAR files or supplied as a same-name `.lrc` sidecar (for example, `Song.mid` plus `Song.lrc`). The library packager includes sidecars in song archives, and an LRC sidecar overrides embedded lyrics.
 - Settings include a persistent MIDI master-volume, reverb, and chorus mix, selectable Violet/Ocean/Emerald appearance themes, SoundFont selection, and looping background-video selection.
+- The song browser renders rows lazily, pages through large libraries, debounces rapid search input, and includes a song-number keypad. The singer queue can skip or automatically start the next valid queued song when playback completes.
 - FluidSynth and wrapper license texts are bundled in the app under `assets/licenses/`.
 - Production in-place APK updates require one stable release keystore. The workflow expects its credentials as GitHub Actions secrets and will not publish a tagged APK without them.
 

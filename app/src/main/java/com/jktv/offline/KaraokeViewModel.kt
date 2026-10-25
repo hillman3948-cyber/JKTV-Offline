@@ -41,6 +41,9 @@ data class LibraryUiState(
     val songCount: Int = 0,
     val installed: Boolean = false,
     val songs: List<SongEntity> = emptyList(),
+    val songQuery: String = "",
+    val songListHasMore: Boolean = false,
+    val songListLoading: Boolean = false,
     val queue: List<QueueRow> = emptyList(),
     val progressText: String? = null,
     val progress: Float = 0f,
@@ -89,6 +92,9 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
     private val preferences = application.getSharedPreferences("jktv-player-settings", Context.MODE_PRIVATE)
     private var pendingManifest: Pair<String, com.jktv.offline.assets.LibraryManifest>? = null
     private var setupJob: Job? = null
+    private var searchJob: Job? = null
+    private var advancingQueue = false
+    private var songQueryGeneration = 0
 
     var state by androidx.compose.runtime.mutableStateOf(LibraryUiState())
         private set
@@ -96,7 +102,19 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
     init {
         refresh()
         viewModelScope.launch {
-            midiEngine.state.collect { playback -> state = state.copy(playback = playback) }
+            midiEngine.state.collect { playback ->
+                val previous = state.playback
+                state = state.copy(playback = playback)
+                val reachedEnd = previous.file != null && previous.file == playback.file &&
+                    previous.positionMs < previous.durationMs && playback.durationMs > 0L &&
+                    playback.positionMs >= playback.durationMs && !playback.playing
+                if (reachedEnd && !advancingQueue) {
+                    advancingQueue = true
+                    viewModelScope.launch {
+                        try { advanceQueue() } finally { advancingQueue = false }
+                    }
+                }
+            }
         }
     }
 
@@ -142,6 +160,23 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
 
     fun seekPlayback(positionMs: Long) {
         viewModelScope.launch(Dispatchers.IO) { midiEngine.seek(positionMs) }
+    }
+
+    fun skipToNext() = viewModelScope.launch {
+        if (advancingQueue) return@launch
+        val hasNext = withContext(Dispatchers.IO) { dao.queue().isNotEmpty() }
+        if (!hasNext) {
+            state = state.copy(error = "There are no songs waiting in the queue.")
+            return@launch
+        }
+        advancingQueue = true
+        try {
+            withContext(Dispatchers.IO) { midiEngine.stop() }
+            state = state.copy(currentSong = null, playback = PlaybackState(), error = null)
+            advanceQueue()
+        } finally {
+            advancingQueue = false
+        }
     }
 
     fun setBackgroundVideo(uri: Uri) {
@@ -268,8 +303,10 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun refresh() = viewModelScope.launch {
+        val currentQuery = state.songQuery
+        val queryGeneration = songQueryGeneration
         val count = withContext(Dispatchers.IO) { dao.songCount() }
-        val songs = withContext(Dispatchers.IO) { dao.page(50, 0) }
+        val songs = querySongPage(currentQuery, 0)
         val queue = withContext(Dispatchers.IO) { dao.queueRows() }
         val fonts = withContext(Dispatchers.IO) { availableSoundFonts() }
         val videos = withContext(Dispatchers.IO) { availableBackgroundVideos() }
@@ -296,10 +333,14 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
                 .putString(KEY_BACKGROUND_NAME, fallbackBackground.name)
                 .apply()
         }
+        val queryStillCurrent = queryGeneration == songQueryGeneration
         state = state.copy(
             songCount = count,
             installed = count > 0,
-            songs = songs,
+            songs = if (queryStillCurrent) songs else state.songs,
+            songQuery = if (queryStillCurrent) currentQuery else state.songQuery,
+            songListHasMore = if (queryStillCurrent) (if (currentQuery.isBlank()) count > songs.size else songs.size == 100) else state.songListHasMore,
+            songListLoading = if (queryStillCurrent) false else state.songListLoading,
             queue = queue,
             backgroundVideos = videos,
             soundFonts = fonts,
@@ -359,18 +400,54 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
         const val KEY_CHORUS_MIX = "mixer_chorus"
     }
 
-    fun search(query: String) = viewModelScope.launch {
-        val rows = withContext(Dispatchers.IO) {
-            if (query.isBlank()) dao.page(100, 0)
-            else {
-                val match = query.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-                    .map { it.replace(Regex("[^\\p{L}\\p{N}]"), "") }
-                    .filter { it.isNotBlank() }.take(8).joinToString(" AND ") { "$it*" }
-                if (match.isBlank()) dao.searchFallback(query.trim())
-                else runCatching { dao.searchFts(match) }.getOrDefault(emptyList()).ifEmpty { dao.searchFallback(query.trim()) }
-            }
+    fun search(query: String) {
+        searchJob?.cancel()
+        val generation = ++songQueryGeneration
+        state = state.copy(songs = emptyList(), songQuery = query, songListHasMore = false, songListLoading = true)
+        searchJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(140)
+            val rows = querySongPage(query, 0)
+            if (generation != songQueryGeneration) return@launch
+            state = state.copy(songs = rows, songQuery = query, songListHasMore = rows.size == 100, songListLoading = false)
         }
-        state = state.copy(songs = rows)
+    }
+
+    fun loadMoreSongs() = viewModelScope.launch {
+        if (state.songListLoading || !state.songListHasMore) return@launch
+        val generation = songQueryGeneration
+        val query = state.songQuery
+        val offset = state.songs.size
+        state = state.copy(songListLoading = true)
+        val more = querySongPage(query, offset)
+        if (generation != songQueryGeneration) return@launch
+        val combined = (state.songs + more).distinctBy { it.id }
+        state = state.copy(songs = combined, songListHasMore = more.size == 100, songListLoading = false)
+    }
+
+    private suspend fun querySongPage(query: String, offset: Int): List<SongEntity> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) dao.page(100, offset)
+        else {
+            val match = query.trim().split(Regex("\\s+"))
+                .map { it.replace(Regex("[^\\p{L}\\p{N}]"), "") }
+                .filter { it.isNotBlank() }.take(8).joinToString(" AND ") { "$it*" }
+            if (match.isBlank()) dao.searchFallback(query.trim(), offset = offset)
+            else runCatching { dao.searchFts(match, offset = offset) }.getOrDefault(emptyList())
+                .ifEmpty { dao.searchFallback(query.trim(), offset = offset) }
+        }
+    }
+
+    private suspend fun advanceQueue() {
+        val next = withContext(Dispatchers.IO) {
+            repeat(30) {
+                val queued = dao.queue().firstOrNull() ?: return@withContext null
+                dao.removeQueueItem(queued.id)
+                dao.reindexQueue()
+                dao.songById(queued.songId)?.let { return@withContext it }
+            }
+            null
+        }
+        refresh()
+        if (next != null) playSong(next)
     }
 
     fun setFavorite(song: SongEntity) = viewModelScope.launch {

@@ -55,10 +55,12 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Dialpad
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.Button
@@ -98,9 +100,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -209,9 +214,9 @@ private fun JktvApp() {
                     if (isSetup) SetupScreen(library, viewModel, onBack = { setupOpen = false })
                     else when (activePage) {
                         Page.Home -> HomeScreen(library, onSetup = { setupOpen = true }, onSongs = { page = Page.Songs.name }, onFavorite = { viewModel.setFavorite(it); Unit }, onAdd = { song, singer -> viewModel.addToQueue(song, singer); Unit }, onPlay = { viewModel.playSong(it); page = Page.Playing.name }, onCheckUpdates = { viewModel.checkForUpdates() })
-                        Page.Songs -> SongsScreen(library, query, onQuery = { query = it; viewModel.search(it) }, onSetup = { setupOpen = true }, onFavorite = { viewModel.setFavorite(it); Unit }, onAdd = { song, singer -> viewModel.addToQueue(song, singer); Unit }, onPlay = { viewModel.playSong(it); page = Page.Playing.name })
-                        Page.Queue -> QueueScreen(library.queue, onSongs = { page = Page.Songs.name }, onRemove = { viewModel.removeFromQueue(it); Unit }, onMove = { id, direction -> viewModel.moveQueueItem(id, direction); Unit }, onClear = { viewModel.clearQueue(); Unit })
-                        Page.Playing -> PlayingScreen(library, onSetup = { setupOpen = true }, onBrowseSongs = { page = Page.Songs.name }, onToggle = { viewModel.togglePlayback() }, onSeek = { viewModel.seekPlayback(it) })
+                        Page.Songs -> SongsScreen(library, query, onQuery = { query = it; viewModel.search(it) }, onSetup = { setupOpen = true }, onFavorite = { viewModel.setFavorite(it); Unit }, onAdd = { song, singer -> viewModel.addToQueue(song, singer); Unit }, onPlay = { viewModel.playSong(it); page = Page.Playing.name }, onLoadMore = { viewModel.loadMoreSongs(); Unit })
+                        Page.Queue -> QueueScreen(library.queue, library.currentSong, onSongs = { page = Page.Songs.name }, onRemove = { viewModel.removeFromQueue(it); Unit }, onMove = { id, direction -> viewModel.moveQueueItem(id, direction); Unit }, onClear = { viewModel.clearQueue(); Unit })
+                        Page.Playing -> PlayingScreen(library, onSetup = { setupOpen = true }, onBrowseSongs = { page = Page.Songs.name }, onToggle = { viewModel.togglePlayback() }, onNext = { viewModel.skipToNext() }, onSeek = { viewModel.seekPlayback(it) })
                         Page.Settings -> SettingsScreen(
                             library = library,
                             onSetup = { setupOpen = true },
@@ -289,23 +294,101 @@ private fun HomeScreen(library: LibraryUiState, onSetup: () -> Unit, onSongs: ()
 }
 
 @Composable
-private fun SongsScreen(library: LibraryUiState, query: String, onQuery: (String) -> Unit, onSetup: () -> Unit, onFavorite: (SongEntity) -> Unit, onAdd: (SongEntity, String) -> Unit, onPlay: (SongEntity) -> Unit) {
-    ScreenColumn {
-        Header("Songs", "OFFLINE LIBRARY")
-        SearchField(query, onQuery)
-        Spacer(Modifier.height(14.dp))
+private fun SongsScreen(library: LibraryUiState, query: String, onQuery: (String) -> Unit, onSetup: () -> Unit, onFavorite: (SongEntity) -> Unit, onAdd: (SongEntity, String) -> Unit, onPlay: (SongEntity) -> Unit, onLoadMore: () -> Unit) {
+    var showKeypad by rememberSaveable { mutableStateOf(false) }
+    var keypadInput by rememberSaveable { mutableStateOf("") }
+    if (showKeypad) {
+        AlertDialog(
+            onDismissRequest = { showKeypad = false },
+            title = { Text("Enter song number", color = Color.White) },
+            text = {
+                Column {
+                    Text(keypadInput.ifBlank { "5-digit song number" }, color = Lilac, fontSize = 21.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    (0..3).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val values = listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("Del", "0", "Clear"))[row]
+                            values.forEach { value ->
+                                androidx.compose.material3.OutlinedButton(
+                                    onClick = {
+                                        keypadInput = when (value) {
+                                            "Del" -> keypadInput.dropLast(1)
+                                            "Clear" -> ""
+                                            else -> (keypadInput + value).take(8)
+                                        }
+                                        onQuery(keypadInput)
+                                    },
+                                    modifier = Modifier.weight(1f).height(52.dp),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) { Text(value, color = Color.White, fontSize = 16.sp) }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showKeypad = false }) { Text("Show results", color = Violet) } },
+            dismissButton = { TextButton(onClick = { showKeypad = false; keypadInput = "" }) { Text("Close", color = Lilac) } },
+            containerColor = Card
+        )
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 22.dp, end = 22.dp, top = 22.dp, bottom = 30.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        item(key = "song-search") {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(Modifier.fillMaxWidth().widthIn(max = 680.dp)) {
+                    Header("Songs", "OFFLINE LIBRARY")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.weight(1f)) { SearchField(query, onQuery) }
+                        androidx.compose.material3.FilledTonalIconButton(onClick = { keypadInput = query.filter(Char::isDigit); showKeypad = true }) {
+                            Icon(Icons.Rounded.Dialpad, "Open song-number keypad", tint = Violet)
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                }
+            }
+        }
         if (library.songs.isEmpty()) {
-            EmptyCard("Your song list will appear here", "Install the MIDI/KAR library to search by title, artist, or song number.", Icons.Rounded.Search)
-            PrimaryAction("Install song library", onSetup)
+            item(key = "song-empty") {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    Column(Modifier.fillMaxWidth().widthIn(max = 680.dp)) {
+                        when {
+                            library.songListLoading -> Text("Searching your offline library…", color = Lilac, fontSize = 14.sp, modifier = Modifier.padding(vertical = 18.dp))
+                            library.songCount == 0 -> {
+                                EmptyCard("Your song list will appear here", "Install the MIDI/KAR library to search by title, artist, or song number.", Icons.Rounded.Search)
+                                PrimaryAction("Install song library", onSetup)
+                            }
+                            query.isNotBlank() -> EmptyCard("No matching songs", "Try a shorter title, artist name, or song number.", Icons.Rounded.Search)
+                        }
+                    }
+                }
+            }
         } else {
-            Text("${library.songCount} songs · showing ${library.songs.size}", color = Lilac, fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp))
-            library.songs.forEach { song -> SongCard(song, onFavorite = { onFavorite(song) }, onAdd = { singer -> onAdd(song, singer) }, onPlay = { onPlay(song) }) }
+            item(key = "song-count") {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    Text("${library.songs.size} loaded · ${library.songCount} songs in library", color = Lilac, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().widthIn(max = 680.dp).padding(bottom = 8.dp))
+                }
+            }
+            items(library.songs, key = { it.id }) { song ->
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    Box(Modifier.fillMaxWidth().widthIn(max = 680.dp)) {
+                        SongCard(song, onFavorite = { onFavorite(song) }, onAdd = { singer -> onAdd(song, singer) }, onPlay = { onPlay(song) })
+                    }
+                }
+            }
+        }
+        if (library.songListLoading && library.songs.isNotEmpty()) item(key = "song-loading") {
+            Text("Loading more songs…", color = Lilac, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().padding(14.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+        if (!library.songListLoading && library.songListHasMore) item(key = "song-more") {
+            androidx.compose.material3.OutlinedButton(onClick = onLoadMore, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Load more songs", color = Violet) }
         }
     }
 }
 
 @Composable
-private fun QueueScreen(queue: List<QueueRow>, onSongs: () -> Unit, onRemove: (Long) -> Unit, onMove: (Long, Int) -> Unit, onClear: () -> Unit) {
+private fun QueueScreen(queue: List<QueueRow>, currentSong: SongEntity?, onSongs: () -> Unit, onRemove: (Long) -> Unit, onMove: (Long, Int) -> Unit, onClear: () -> Unit) {
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     if (confirmClear) {
         AlertDialog(
@@ -321,7 +404,7 @@ private fun QueueScreen(queue: List<QueueRow>, onSongs: () -> Unit, onRemove: (L
         Header("Singer queue", "YOUR TURN, YOUR ORDER")
         GradientCard {
             Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column { Text("NOW SINGING", color = Lilac, fontSize = 11.sp, letterSpacing = 1.sp); Text("No song playing", color = Color.White, fontSize = 16.sp, modifier = Modifier.padding(top = 6.dp)) }
+                Column(Modifier.weight(1f)) { Text("NOW SINGING", color = Lilac, fontSize = 11.sp, letterSpacing = 1.sp); Text(currentSong?.title ?: "No song playing", color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)); currentSong?.artist?.takeIf { it.isNotBlank() }?.let { Text(it, color = Lilac, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
                 Column(horizontalAlignment = Alignment.End) {
                     Text("UP NEXT", color = Lilac, fontSize = 11.sp, letterSpacing = 1.sp)
                     Text(queue.firstOrNull()?.title ?: "Queue is empty", color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
@@ -341,7 +424,7 @@ private fun QueueScreen(queue: List<QueueRow>, onSongs: () -> Unit, onRemove: (L
 }
 
 @Composable
-private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowseSongs: () -> Unit, onToggle: () -> Unit, onSeek: (Long) -> Unit) {
+private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowseSongs: () -> Unit, onToggle: () -> Unit, onNext: () -> Unit, onSeek: (Long) -> Unit) {
     val playback = library.playback
     val duration = playback.durationMs.coerceAtLeast(0L)
     var isSeeking by remember { mutableStateOf(false) }
@@ -353,8 +436,11 @@ private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowse
     }
     val currentLyricIndex = playback.lyrics.indexOfLast { it.timeMs <= playback.positionMs }
     val displayedLyricIndex = currentLyricIndex.coerceAtLeast(0)
-    val currentLyric = playback.lyrics.getOrNull(displayedLyricIndex)
-    val nextLyric = playback.lyrics.getOrNull(displayedLyricIndex + 1)
+    val lineStarts = playback.lyrics.indices.filter { it == 0 || playback.lyrics[it].beginsLine }
+    val currentLineStart = lineStarts.lastOrNull { it <= displayedLyricIndex } ?: 0
+    val currentLineEnd = lineStarts.firstOrNull { it > currentLineStart } ?: playback.lyrics.size
+    val nextLineStart = currentLineEnd.takeIf { it < playback.lyrics.size }
+    val nextLineEnd = nextLineStart?.let { start -> lineStarts.firstOrNull { it > start } ?: playback.lyrics.size }
     val backgroundUri = library.backgroundVideoUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
     var videoError by remember(backgroundUri?.toString()) { mutableStateOf<String?>(null) }
     ScreenColumn {
@@ -376,8 +462,8 @@ private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowse
                     Text("No timed lyrics in this file", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
                     Text("No timed lyrics are embedded in this song. Add a same-name .lrc file beside it, or use a lyric-enabled .KAR file.", color = Lilac, fontSize = 13.sp, lineHeight = 19.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 7.dp))
                 } else {
-                    Text(currentLyric?.text ?: "♪", color = Color.White, fontSize = 27.sp, lineHeight = 35.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    if (nextLyric != null) Text(nextLyric.text, color = Color.White.copy(alpha = .78f), fontSize = 17.sp, lineHeight = 24.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 18.dp))
+                    KaraokeLyricLine(playback.lyrics, currentLineStart, currentLineEnd, displayedLyricIndex, 25.sp, Modifier.fillMaxWidth())
+                    if (nextLineStart != null && nextLineEnd != null) KaraokeLyricLine(playback.lyrics, nextLineStart, nextLineEnd, -1, 18.sp, Modifier.fillMaxWidth().padding(top = 15.dp), upcoming = true)
                 }
                 if (videoError != null) {
                     Text(videoError.orEmpty(), color = Orange, fontSize = 12.sp, lineHeight = 17.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
@@ -405,13 +491,54 @@ private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowse
             IconButton(onClick = onToggle, enabled = playback.file != null, modifier = Modifier.size(72.dp).clip(CircleShape).background(Violet)) {
                 Icon(if (playback.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playback.playing) "Pause" else "Play", tint = Color.White, modifier = Modifier.size(38.dp))
             }
+            IconButton(onClick = onNext, enabled = playback.file != null) { Icon(Icons.Rounded.SkipNext, "Skip to next queued song", tint = Lilac) }
         }
-        if (!library.error.isNullOrBlank() && playback.file == null) Text(library.error, color = Orange, fontSize = 13.sp, lineHeight = 19.sp)
+        if (!library.error.isNullOrBlank()) Text(library.error, color = Orange, fontSize = 13.sp, lineHeight = 19.sp)
         if (!library.installed) {
             Spacer(Modifier.height(8.dp))
             PrimaryAction("Set up offline library", onSetup)
         }
     }
+}
+
+@Composable
+private fun KaraokeLyricLine(
+    lyrics: List<com.jktv.offline.playback.TimedLyricEvent>,
+    start: Int,
+    end: Int,
+    activeIndex: Int,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    modifier: Modifier = Modifier,
+    upcoming: Boolean = false
+) {
+    val line = buildAnnotatedString {
+        var previousToken: String? = null
+        for (index in start until end) {
+            val token = lyrics[index].text.trim()
+            if (token.isBlank()) continue
+            val showToken = token.removeSuffix("-")
+            if (previousToken != null && !previousToken.endsWith("-") && !token.startsWith("-")) append(" ")
+            val tint = when {
+                upcoming -> Color.White.copy(alpha = .72f)
+                index < activeIndex -> Violet
+                index == activeIndex -> Orange
+                else -> Color.White
+            }
+            withStyle(SpanStyle(color = tint, fontWeight = FontWeight.Bold)) { append(showToken) }
+            previousToken = token
+        }
+    }
+    Text(
+        text = line,
+        color = Color.White,
+        fontSize = fontSize,
+        lineHeight = fontSize * 1.3f,
+        fontWeight = FontWeight.Bold,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = modifier
+    )
 }
 
 @Composable

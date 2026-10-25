@@ -60,6 +60,9 @@ data class QueueRow(
 
 @Dao
 interface KaraokeDao {
+    @Query("SELECT * FROM songs WHERE id = :songId AND available = 1 LIMIT 1")
+    suspend fun songById(songId: Long): SongEntity?
+
     @Query("SELECT * FROM songs WHERE available = 1 ORDER BY title COLLATE NOCASE LIMIT :limit OFFSET :offset")
     suspend fun page(limit: Int, offset: Int): List<SongEntity>
 
@@ -71,12 +74,12 @@ interface KaraokeDao {
         JOIN songs_fts ON songs.rowid = songs_fts.rowid
         WHERE songs.available = 1 AND songs_fts MATCH :match
         ORDER BY songs.title COLLATE NOCASE
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """)
-    suspend fun searchFts(match: String, limit: Int = 100): List<SongEntity>
+    suspend fun searchFts(match: String, limit: Int = 100, offset: Int = 0): List<SongEntity>
 
-    @Query("SELECT * FROM songs WHERE available = 1 AND (title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%' OR songNumber LIKE '%' || :query || '%') ORDER BY title COLLATE NOCASE LIMIT :limit")
-    suspend fun searchFallback(query: String, limit: Int = 100): List<SongEntity>
+    @Query("SELECT * FROM songs WHERE available = 1 AND (title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%' OR songNumber LIKE '%' || :query || '%') ORDER BY title COLLATE NOCASE LIMIT :limit OFFSET :offset")
+    suspend fun searchFallback(query: String, limit: Int = 100, offset: Int = 0): List<SongEntity>
 
     @Query("SELECT * FROM songs WHERE available = 1 AND favorite = 1 ORDER BY title COLLATE NOCASE")
     suspend fun favorites(): List<SongEntity>
