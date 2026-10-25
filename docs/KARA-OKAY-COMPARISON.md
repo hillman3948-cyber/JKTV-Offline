@@ -28,7 +28,7 @@ Review date: 2026-10-25. This review compares the JKTV source in this workspace 
 | Singing score and microphone test | No capture/pitch-scoring pipeline | Not added: this needs microphone permission, audio analysis, calibration, and device testing. |
 | Instrument-by-instrument mixer | Current controls are master volume, reverb, and chorus | Partial mixer only. Per-channel/instrument faders need sequencer/MIDI-channel control; the wrapper used here does not expose that API. |
 | Lyric editing and tap-to-time | Lyrics are read-only during playback | Not added in this implementation slice; safe edits need a sidecar editor and synchronization workflow. |
-| User-owned MIDI/KAR/MP3 songs and karaoke videos | Users can pick an MP4 background and import SF2; the downloaded catalog is indexed | MIDI/KAR/MP3 import and general media catalog are still missing. MP3 playback/vocal removal would need a separate playback/DSP pipeline. |
+| User-owned MIDI/KAR/MP3 songs and karaoke videos | Users can pick an MP4 background and import SF2; this update adds MIDI/KAR import with optional same-name `.lrc` files into app-private storage | MIDI/KAR plus LRC now work offline and are indexed with the library. MP3 playback/vocal removal and a general media catalog remain missing. |
 | App theme and lyric appearance controls | Three app color palettes; lyric sizing/outline controls are absent | App themes are present. Per-lyric typography controls remain missing. |
 | Printable PDF songbook | No PDF export | Missing. |
 | Phone/TV remote, QR pairing, Android TV | No remote service or pairing flow | Missing; requires a network protocol and TV-focus navigation. |
@@ -42,11 +42,12 @@ This update focuses on features that fit the existing native architecture withou
 1. Display MIDI/KAR lyric events as complete lines and highlight the timed lyric token, with the next line queued visually.
 2. Automatically consume the next valid queue item after a song completes; add an explicit Skip control.
 3. Add an on-screen song-number keypad and debounce/cancel stale search requests to reduce unnecessary catalog queries while typing.
+4. Import selected MIDI/KAR songs and matching `.lrc` sidecars from Android's document picker, then index and play them offline from app-private storage. No broad storage permission is needed; these imports remain separate from downloaded library package updates.
 
-The work is additive to the existing database schema; no queue, favorites, installed library, or user preferences are intentionally cleared. A full parity implementation would still require separate engineering for channel mixing, transpose/tempo, pitch scoring, lyric editing, MP3, PDF export, folder imports, and TV remote support.
+The work is additive to the existing database schema; no queue, favorites, installed library, or user preferences are intentionally cleared. A full parity implementation would still require separate engineering for channel mixing, transpose/tempo, pitch scoring, lyric editing, MP3, PDF export, bulk folder import, and TV remote support.
 
 ## Licensing and compatibility
 
 The supplied KARA-OKAY ZIP has no source or license files, and its README says the source is not public. The review uses its README feature list as a product reference only. JKTV retains its existing FluidSynth-KMP/FluidSynth notices. No KARA-OKAY source code, fonts, screenshots, or logo assets are incorporated.
 
-JKTV remains a native Android app (`minSdk 26`, `targetSdk 35`). The listed PC-only KARA-OKAY capabilities are not directly applicable. Microphone scoring, folder import, and TV remote functions also require permissions, accessibility work, protocol design, and real-device verification beyond the changes in this update.
+JKTV remains a native Android app (`minSdk 26`, `targetSdk 35`). The listed PC-only KARA-OKAY capabilities are not directly applicable. Android's document picker grants access only to files the user selects; no all-files permission is requested. Microphone scoring, bulk folder import, and TV remote functions require separate accessibility work, protocol design, and real-device verification.

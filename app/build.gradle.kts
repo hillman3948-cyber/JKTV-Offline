@@ -10,7 +10,7 @@ android {
     compileSdk = 35
 
     val configuredVersionName = providers.gradleProperty("versionName").orElse("0.3.4").get()
-    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("9").get().toInt()
+    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("10").get().toInt()
     val repositoryValue = providers.gradleProperty("jktvGithubRepository")
         .orElse(providers.environmentVariable("GITHUB_REPOSITORY"))
         .orElse("hillman3948-cyber/JKTV-Offline")

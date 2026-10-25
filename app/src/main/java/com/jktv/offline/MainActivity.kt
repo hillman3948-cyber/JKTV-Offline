@@ -159,6 +159,9 @@ private fun JktvApp() {
     val soundFontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.importSoundFont(uri)
     }
+    val songPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        viewModel.importSongs(uris)
+    }
     var page by rememberSaveable { mutableStateOf(Page.Home.name) }
     var setupOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -225,6 +228,7 @@ private fun JktvApp() {
                             onClearBackground = { viewModel.clearBackgroundVideo() },
                             onSelectSoundFont = { viewModel.selectSoundFont(it) },
                             onImportSoundFont = { soundFontPicker.launch(arrayOf("*/*")) },
+                            onImportSongs = { songPicker.launch(arrayOf("*/*")) },
                             onSetSoundMix = { master, reverb, chorus -> viewModel.setSoundMix(master, reverb, chorus) },
                             onSelectTheme = { viewModel.selectTheme(it) }
                         )
@@ -550,6 +554,7 @@ private fun SettingsScreen(
     onClearBackground: () -> Unit,
     onSelectSoundFont: (String) -> Unit,
     onImportSoundFont: () -> Unit,
+    onImportSongs: () -> Unit,
     onSetSoundMix: (Float, Float, Float) -> Unit,
     onSelectTheme: (String) -> Unit
 ) {
@@ -568,6 +573,8 @@ private fun SettingsScreen(
         Text("Choose a video saved on your phone. It loops silently behind the lyrics.", color = Lilac, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp))
         Text("MIDI AUDIO", color = Lilac, fontSize = 11.sp, letterSpacing = 1.1.sp, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
         SettingRow("SoundFont", selectedFont?.name ?: "Set up the library or import an SF2 file", Icons.Rounded.Equalizer, { showSoundFonts = true })
+        SettingRow("Import MIDI/KAR songs", "Choose songs stored on this phone", Icons.Rounded.LibraryMusic, onImportSongs)
+        Text("Select MIDI/KAR files and optional same-name .lrc lyrics. Imported files stay on this device and work offline.", color = Lilac, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp))
         Text("SOUND MIX", color = Lilac, fontSize = 11.sp, letterSpacing = 1.1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 5.dp))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Card).padding(horizontal = 16.dp, vertical = 12.dp)) {
             MixSlider("Master volume", library.masterVolume, "${(library.masterVolume * 100).toInt()}%") { value -> onSetSoundMix(value, library.reverbMix, library.chorusMix) }

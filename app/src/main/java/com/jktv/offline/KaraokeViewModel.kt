@@ -132,8 +132,10 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
                     .firstOrNull()
                     ?.let { File(it.path) }
                 ?: throw IllegalStateException("No SF2 SoundFont is listed in the installed library.")
-            val songsRoot = File(app.filesDir, "karaoke/library/songs").canonicalFile
-            val midiFile = File(songsRoot, song.relativePath).canonicalFile
+            val userSong = song.relativePath.startsWith("user/")
+            val songsRoot = File(app.filesDir, if (userSong) "karaoke/user-songs" else "karaoke/library/songs").canonicalFile
+            val relativePath = if (userSong) song.relativePath.removePrefix("user/") else song.relativePath
+            val midiFile = File(songsRoot, relativePath).canonicalFile
             require(midiFile.path.startsWith(songsRoot.path + File.separator) && midiFile.isFile) {
                 "This song file is not available in the installed library."
             }
@@ -294,6 +296,71 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             state = state.copy(settingsMessage = error.message ?: "Could not import the SoundFont.")
+        }
+    }
+
+    fun importSongs(uris: List<Uri>) = viewModelScope.launch {
+        if (uris.isEmpty()) return@launch
+        state = state.copy(settingsMessage = "Importing MIDI/KAR songs…")
+        try {
+            val app = getApplication<Application>()
+            val result = withContext(Dispatchers.IO) {
+                val accepted = uris.mapNotNull { uri ->
+                    val name = app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    }?.substringAfterLast('/') ?: return@mapNotNull null
+                    val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                    if (extension !in setOf("mid", "midi", "kar", "lrc")) return@mapNotNull null
+                    uri to name
+                }
+                if (accepted.none { it.second.substringAfterLast('.', "").lowercase(Locale.ROOT) in setOf("mid", "midi", "kar") }) {
+                    throw IllegalArgumentException("Select at least one MIDI or KAR file. You can also select matching .lrc lyric files.")
+                }
+                val batchFolder = File(app.filesDir, "karaoke/user-songs/${UUID.randomUUID()}").apply { mkdirs() }
+                var copiedSongs = 0
+                var copiedLyrics = 0
+                accepted.forEach { (uri, originalName) ->
+                    val extension = originalName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                    val safeName = originalName.replace(Regex("[^A-Za-z0-9._() -]"), "_").take(180)
+                    val target = File(batchFolder, safeName)
+                    val temp = File(batchFolder, "${UUID.randomUUID()}.part")
+                    try {
+                        val input = app.contentResolver.openInputStream(uri)
+                            ?: throw IllegalArgumentException("Could not open $originalName.")
+                        input.use { source -> FileOutputStream(temp).use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            var total = 0L
+                            while (true) {
+                                val count = source.read(buffer)
+                                if (count < 0) break
+                                total += count
+                                val limit = if (extension == "lrc") 4L * 1024 * 1024 else 128L * 1024 * 1024
+                                require(total <= limit) { "$originalName is larger than the supported import size." }
+                                output.write(buffer, 0, count)
+                            }
+                        } }
+                        if (extension == "lrc") {
+                            require(temp.length() > 0L) { "$originalName is empty." }
+                            copiedLyrics++
+                        } else {
+                            val signature = ByteArray(4)
+                            temp.inputStream().use { require(it.read(signature) == 4 && String(signature, Charsets.US_ASCII) == "MThd") { "$originalName is not a valid MIDI/KAR file." } }
+                            copiedSongs++
+                        }
+                        if (!temp.renameTo(target)) temp.copyTo(target, overwrite = false)
+                    } finally {
+                        temp.delete()
+                    }
+                }
+                val manifestVersion = installer.installedLibraryManifest()?.libraryVersion ?: "local"
+                indexer.index(manifestVersion)
+                copiedSongs to copiedLyrics
+            }
+            refresh()
+            state = state.copy(settingsMessage = "Imported ${result.first} MIDI/KAR song${if (result.first == 1) "" else "s"}${if (result.second > 0) " and ${result.second} lyric file${if (result.second == 1) "" else "s"}" else ""}. Available offline.")
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            state = state.copy(settingsMessage = error.message ?: "Could not import the selected songs.")
         }
     }
 

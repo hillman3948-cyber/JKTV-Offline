@@ -7,10 +7,16 @@ import java.io.File
 
 class SongIndexer(context: Context) {
     private val root = File(context.filesDir, "karaoke/library/songs")
+    private val userRoot = File(context.filesDir, "karaoke/user-songs")
     private val dao = KaraokeDatabase.get(context).karaokeDao()
 
     suspend fun index(packageVersion: String, onProgress: (Int, Int) -> Unit = { _, _ -> }): Int = withContext(Dispatchers.IO) {
-        val found = root.walkTopDown().filter { it.isFile && it.extension.lowercase() in setOf("mid", "midi", "kar") }.toList()
+        val found = buildList {
+            root.walkTopDown().filter { it.isFile && it.extension.lowercase() in setOf("mid", "midi", "kar") }
+                .forEach { add(it to it.relativeTo(root).invariantSeparatorsPath) }
+            userRoot.walkTopDown().filter { it.isFile && it.extension.lowercase() in setOf("mid", "midi", "kar") }
+                .forEach { add(it to "user/${it.relativeTo(userRoot).invariantSeparatorsPath}") }
+        }
         val batch = ArrayList<SongEntity>(250)
         var indexed = 0
         dao.markAllUnavailable()
@@ -31,8 +37,7 @@ class SongIndexer(context: Context) {
             indexed += updated.size
             batch.clear()
         }
-        found.forEachIndexed { index, file ->
-            val relative = file.relativeTo(root).invariantSeparatorsPath
+        found.forEachIndexed { index, (file, relative) ->
             val stem = file.nameWithoutExtension
             val parsedName = stem.replace(Regex("^\\s*\\d+\\s*[-._ ]+\\s*"), "").trim()
             val parts = parsedName.split(Regex("\\s+[-–—]\\s+")).map(String::trim).filter(String::isNotEmpty)
@@ -40,7 +45,8 @@ class SongIndexer(context: Context) {
             val artist = parts.drop(1).joinToString(" - ")
             if (title.isNotBlank()) {
                 val number = Regex("^\\s*(\\d+)\\s*[-._ ]").find(stem)?.groupValues?.getOrNull(1).orEmpty()
-                batch += SongEntity(songNumber = number, title = title.take(255), artist = artist.take(190), relativePath = relative, packageVersion = packageVersion)
+                val hasLrc = File(file.parentFile, "${file.nameWithoutExtension}.lrc").isFile
+                batch += SongEntity(songNumber = number, title = title.take(255), artist = artist.take(190), relativePath = relative, packageVersion = packageVersion, hasLyrics = hasLrc)
             }
             if (batch.size == 250 || index == found.lastIndex) {
                 saveBatch()
