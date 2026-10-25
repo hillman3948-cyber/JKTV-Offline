@@ -1,0 +1,25 @@
+{
+  "formatVersion": 1,
+  "app": "JKTV Karaoke",
+  "libraryVersion": "1.0.0",
+  "minimumAppVersion": "0.1.0",
+  "soundfonts": [
+    {
+      "id": "default-gm",
+      "filename": "default-gm.sf2",
+      "url": "https://github.com/hillman3948-cyber/JKTV-Offline/releases/download/library-v1.0.0/default-gm-v1.0.0.sf2",
+      "sizeBytes": 0,
+      "sha256": "REPLACE_WITH_64_HEX_SHA256"
+    }
+  ],
+  "songPackages": [
+    {
+      "id": "songs-v1.0.0-part-001",
+      "filename": "songs-v1.0.0-part-001.zip",
+      "url": "https://github.com/hillman3948-cyber/JKTV-Offline/releases/download/library-v1.0.0/songs-v1.0.0-part-001.zip",
+      "sizeBytes": 0,
+      "sha256": "REPLACE_WITH_64_HEX_SHA256"
+    }
+  ],
+  "deletedFiles": []
+}

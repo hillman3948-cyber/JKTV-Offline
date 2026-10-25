@@ -1,0 +1,15 @@
+.gradle/
+**/build/
+local.properties
+*.iml
+.idea/
+*.jks
+*.keystore
+keystore.properties
+.env
+build/assets/
+/songs/
+/SoundFont/
+*.apk
+*.aab
+
