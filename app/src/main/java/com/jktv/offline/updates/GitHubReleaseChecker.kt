@@ -22,7 +22,7 @@ data class GitHubAppUpdate(
 )
 
 class GitHubReleaseChecker(private val context: Context, private val repository: String) {
-    suspend fun checkForAppUpdate(currentVersion: String): GitHubAppUpdate? = withContext(Dispatchers.IO) {
+    suspend fun checkForAppUpdate(currentVersion: String, currentVersionCode: Int): GitHubAppUpdate? = withContext(Dispatchers.IO) {
         require(repository.matches(Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))) {
             "Set jktvGithubRepository to hillman3948-cyber/JKTV-Offline before checking GitHub releases."
         }
@@ -33,8 +33,6 @@ class GitHubReleaseChecker(private val context: Context, private val repository:
             .filter { (_, version) -> versionMatches(version) }
             .maxWithOrNull { left, right -> compareVersions(left.second, right.second) }
             ?: return@withContext null
-        if (compareVersions(current.second, currentVersion) <= 0) return@withContext null
-
         val assets = current.first.optJSONArray("assets") ?: throw IllegalStateException("The latest app release has no downloadable assets.")
         val versionMetadataAsset = assets.findAsset("app-version.json")
             ?: throw IllegalStateException("The app release is missing app-version.json.")
@@ -44,11 +42,14 @@ class GitHubReleaseChecker(private val context: Context, private val repository:
             "The GitHub release is for a different Android app package."
         }
         val versionName = metadata.getString("versionName")
-        require(versionName == current.second && compareVersions(versionName, currentVersion) > 0) {
+        val versionCode = metadata.getInt("versionCode")
+        require(versionName == current.second && compareVersions(versionName, currentVersion) >= 0) {
             "The release version metadata does not match its tag."
         }
-        val versionCode = metadata.getInt("versionCode")
         require(versionCode > 0) { "The release has an invalid Android version code." }
+        if (compareVersions(versionName, currentVersion) < 0 ||
+            (compareVersions(versionName, currentVersion) == 0 && versionCode <= currentVersionCode)
+        ) return@withContext null
         val apkName = metadata.getString("apk")
         require(apkName == File(apkName).name && apkName.endsWith(".apk", true)) { "The release has an unsafe APK filename." }
         val apkAsset = assets.findAsset(apkName) ?: throw IllegalStateException("The signed APK is missing from the release.")

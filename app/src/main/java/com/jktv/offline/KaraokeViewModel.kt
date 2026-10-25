@@ -70,7 +70,11 @@ data class LibraryUiState(
     val backgroundVideos: List<BackgroundVideoOption> = emptyList(),
     val soundFonts: List<SoundFontOption> = emptyList(),
     val selectedSoundFontPath: String? = null,
-    val settingsMessage: String? = null
+    val settingsMessage: String? = null,
+    val themeName: String = "Violet",
+    val masterVolume: Float = 0.8f,
+    val reverbMix: Float = 0.25f,
+    val chorusMix: Float = 0.35f
 )
 
 data class SoundFontOption(val path: String, val name: String)
@@ -201,6 +205,26 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun setSoundMix(master: Float, reverb: Float, chorus: Float) {
+        val safeMaster = master.coerceIn(0f, 1f)
+        val safeReverb = reverb.coerceIn(0f, 1f)
+        val safeChorus = chorus.coerceIn(0f, 1f)
+        preferences.edit()
+            .putFloat(KEY_MASTER_VOLUME, safeMaster)
+            .putFloat(KEY_REVERB_MIX, safeReverb)
+            .putFloat(KEY_CHORUS_MIX, safeChorus)
+            .apply()
+        state = state.copy(masterVolume = safeMaster, reverbMix = safeReverb, chorusMix = safeChorus)
+        runCatching { midiEngine.setMixer(safeMaster, safeReverb, safeChorus) }
+            .onFailure { state = state.copy(settingsMessage = it.message ?: "Could not apply the sound mix.") }
+    }
+
+    fun selectTheme(name: String) {
+        val safeName = name.takeIf { it in setOf("Violet", "Ocean", "Emerald") } ?: "Violet"
+        preferences.edit().putString(KEY_THEME, safeName).apply()
+        state = state.copy(themeName = safeName)
+    }
+
     fun importSoundFont(uri: Uri) = viewModelScope.launch {
         state = state.copy(settingsMessage = "Importing SoundFont…")
         try {
@@ -280,6 +304,10 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
             backgroundVideos = videos,
             soundFonts = fonts,
             selectedSoundFontPath = selectedFont?.path,
+            themeName = preferences.getString(KEY_THEME, "Violet") ?: "Violet",
+            masterVolume = preferences.getFloat(KEY_MASTER_VOLUME, 0.8f),
+            reverbMix = preferences.getFloat(KEY_REVERB_MIX, 0.25f),
+            chorusMix = preferences.getFloat(KEY_CHORUS_MIX, 0.35f),
             backgroundVideoUri = backgroundUri,
             backgroundVideoName = if (savedBackgroundIsAvailable) preferences.getString(KEY_BACKGROUND_NAME, null)
                 ?: backgroundUri?.substringAfterLast('/')?.substringBefore('?') else fallbackBackground?.name
@@ -325,6 +353,10 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
         const val KEY_BACKGROUND_URI = "background_video_uri"
         const val KEY_BACKGROUND_NAME = "background_video_name"
         const val KEY_SOUND_FONT = "selected_soundfont_path"
+        const val KEY_THEME = "appearance_theme"
+        const val KEY_MASTER_VOLUME = "mixer_master_volume"
+        const val KEY_REVERB_MIX = "mixer_reverb"
+        const val KEY_CHORUS_MIX = "mixer_chorus"
     }
 
     fun search(query: String) = viewModelScope.launch {
@@ -385,7 +417,7 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
     fun checkForUpdates() = viewModelScope.launch {
         state = state.copy(updateCheckBusy = true, updateMessage = null, updateInfo = null, libraryUpdateManifest = null, libraryUpdateDownloadBytes = null, updateReadyPath = null)
         try {
-            val update = releaseChecker.checkForAppUpdate(BuildConfig.VERSION_NAME)
+            val update = releaseChecker.checkForAppUpdate(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
             val manifestUrl = BuildConfig.LIBRARY_MANIFEST_URL
             require(manifestUrl.isNotBlank()) { "Configure jktvLibraryManifestUrl with the HTTPS library-manifest.json URL before checking the library." }
             val latestLibrary = installer.readManifest(manifestUrl)

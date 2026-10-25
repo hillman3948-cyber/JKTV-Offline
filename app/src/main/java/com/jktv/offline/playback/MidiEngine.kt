@@ -34,6 +34,16 @@ class FluidSynthMidiEngine : MidiEngine {
     private var player: MidiFilePlayer? = null
     private var timeline: MidiTimeline? = null
     private var ticker: Job? = null
+    private var masterGain = 0.8f
+    private var reverbLevel = 0.25
+    private var chorusLevel = 3.5
+
+    override fun setMixer(master: Float, reverb: Float, chorus: Float) {
+        masterGain = master.coerceIn(0f, 1f)
+        reverbLevel = reverb.coerceIn(0f, 1f).toDouble()
+        chorusLevel = chorus.coerceIn(0f, 1f).toDouble() * 10.0
+        if (player != null) applyMixerToSynth()
+    }
 
     override suspend fun setSoundFont(file: File) {
         require(file.isFile && file.length() > 0L) { "The installed SoundFont is missing or empty." }
@@ -54,6 +64,7 @@ class FluidSynthMidiEngine : MidiEngine {
                 config = AudioConfig(sampleRate = 44100, interpolation = Interpolation.NORMAL)
             )
             player = created
+            applyMixerToSynth()
             timeline = parsed
             mutableState.value = PlaybackState(file = file, durationMs = parsed.durationMs, lyrics = parsed.lyrics)
             startTicker()
@@ -119,6 +130,24 @@ class FluidSynthMidiEngine : MidiEngine {
         timeline = null
     }
 
+    /** Applies the public FluidSynth controls to the synth owned by the pinned MIDI-player dependency. */
+    private fun applyMixerToSynth() {
+        try {
+            val activePlayer = player ?: return
+            val contextField = activePlayer.javaClass.getDeclaredField("context").apply { isAccessible = true }
+            val context = contextField.get(activePlayer)
+            val synthPtr = context.javaClass.getMethod("getSynthPtr").invoke(context) as Long
+            val jni = Class.forName("dev.kotlinds.fluidsynthkmp.FluidSynthJni")
+            val instance = jni.getField("INSTANCE").get(null)
+            val pointer = java.lang.Long.TYPE
+            jni.getMethod("setGain", pointer, java.lang.Float.TYPE).invoke(instance, synthPtr, masterGain)
+            jni.getMethod("setReverbLevel", pointer, java.lang.Double.TYPE).invoke(instance, synthPtr, reverbLevel)
+            jni.getMethod("setChorusLevel", pointer, java.lang.Double.TYPE).invoke(instance, synthPtr, chorusLevel)
+        } catch (error: ReflectiveOperationException) {
+            throw IllegalStateException("This audio engine could not apply the sound mix. Restart playback and try again.", error)
+        }
+    }
+
     override fun release() {
         releasePlayer()
         scope.cancel()
@@ -128,6 +157,7 @@ class FluidSynthMidiEngine : MidiEngine {
 interface MidiEngine {
     val state: StateFlow<PlaybackState>
     suspend fun setSoundFont(file: File)
+    fun setMixer(master: Float, reverb: Float, chorus: Float)
     suspend fun load(file: File)
     fun play()
     fun pause()

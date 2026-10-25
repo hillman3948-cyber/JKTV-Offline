@@ -1,6 +1,7 @@
 package com.jktv.offline
 
 import android.content.Intent
+import android.app.Activity
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
@@ -86,6 +87,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,6 +95,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -105,13 +108,19 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jktv.offline.data.QueueRow
 import com.jktv.offline.data.SongEntity
 
-private val Ink = Color(0xFF12051F)
-private val Surface = Color(0xFF1B0B2D)
-private val Card = Color(0xFF28183B)
-private val Violet = Color(0xFFA020F0)
-private val Lilac = Color(0xFFB8A9C8)
-private val Orange = Color(0xFFFF6A21)
-private val Neon = Brush.linearGradient(listOf(Violet, Color(0xFF8B5CF6), Orange))
+private data class AppPalette(val ink: Color, val surface: Color, val card: Color, val accent: Color, val soft: Color, val warm: Color)
+private val VioletPalette = AppPalette(Color(0xFF12051F), Color(0xFF1B0B2D), Color(0xFF28183B), Color(0xFFA020F0), Color(0xFFB8A9C8), Color(0xFFFF6A21))
+private val OceanPalette = AppPalette(Color(0xFF061522), Color(0xFF0C2438), Color(0xFF14344C), Color(0xFF19A7CE), Color(0xFF9FC7D8), Color(0xFF54D6C7))
+private val EmeraldPalette = AppPalette(Color(0xFF061A17), Color(0xFF0B2A25), Color(0xFF153A32), Color(0xFF20C997), Color(0xFFA7D8C9), Color(0xFFFFB454))
+private var activePalette by mutableStateOf(VioletPalette)
+private val Ink get() = activePalette.ink
+private val Surface get() = activePalette.surface
+private val Card get() = activePalette.card
+private val Violet get() = activePalette.accent
+private val Lilac get() = activePalette.soft
+private val Orange get() = activePalette.warm
+private val Neon get() = Brush.linearGradient(listOf(Violet, Color(0xFF8B5CF6), Orange))
+private fun paletteFor(name: String) = when (name) { "Ocean" -> OceanPalette; "Emerald" -> EmeraldPalette; else -> VioletPalette }
 
 private enum class Page(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Rounded.Home),
@@ -149,6 +158,13 @@ private fun JktvApp() {
     var setupOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     val selected = Page.valueOf(page)
+    SideEffect {
+        activePalette = paletteFor(library.themeName)
+        (context as? Activity)?.window?.let { window ->
+            window.statusBarColor = Ink.toArgb()
+            window.navigationBarColor = Surface.toArgb()
+        }
+    }
     LaunchedEffect(library.installed) {
         if (!library.installed) setupOpen = true
         else setupOpen = false
@@ -203,7 +219,9 @@ private fun JktvApp() {
                             onSelectDownloadedBackground = { viewModel.selectDownloadedBackground(it) },
                             onClearBackground = { viewModel.clearBackgroundVideo() },
                             onSelectSoundFont = { viewModel.selectSoundFont(it) },
-                            onImportSoundFont = { soundFontPicker.launch(arrayOf("*/*")) }
+                            onImportSoundFont = { soundFontPicker.launch(arrayOf("*/*")) },
+                            onSetSoundMix = { master, reverb, chorus -> viewModel.setSoundMix(master, reverb, chorus) },
+                            onSelectTheme = { viewModel.selectTheme(it) }
                         )
                     }
                 }
@@ -404,7 +422,9 @@ private fun SettingsScreen(
     onSelectDownloadedBackground: (String) -> Unit,
     onClearBackground: () -> Unit,
     onSelectSoundFont: (String) -> Unit,
-    onImportSoundFont: () -> Unit
+    onImportSoundFont: () -> Unit,
+    onSetSoundMix: (Float, Float, Float) -> Unit,
+    onSelectTheme: (String) -> Unit
 ) {
     var showSoundFonts by rememberSaveable { mutableStateOf(false) }
     var showBackgroundVideos by rememberSaveable { mutableStateOf(false) }
@@ -421,6 +441,23 @@ private fun SettingsScreen(
         Text("Choose a video saved on your phone. It loops silently behind the lyrics.", color = Lilac, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp))
         Text("MIDI AUDIO", color = Lilac, fontSize = 11.sp, letterSpacing = 1.1.sp, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
         SettingRow("SoundFont", selectedFont?.name ?: "Set up the library or import an SF2 file", Icons.Rounded.Equalizer, { showSoundFonts = true })
+        Text("SOUND MIX", color = Lilac, fontSize = 11.sp, letterSpacing = 1.1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 5.dp))
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Card).padding(horizontal = 16.dp, vertical = 12.dp)) {
+            MixSlider("Master volume", library.masterVolume, "${(library.masterVolume * 100).toInt()}%") { value -> onSetSoundMix(value, library.reverbMix, library.chorusMix) }
+            MixSlider("Room reverb", library.reverbMix, "${(library.reverbMix * 100).toInt()}%") { value -> onSetSoundMix(library.masterVolume, value, library.chorusMix) }
+            MixSlider("Chorus width", library.chorusMix, "${(library.chorusMix * 100).toInt()}%") { value -> onSetSoundMix(library.masterVolume, library.reverbMix, value) }
+        }
+        Text("Changes apply to MIDI playback and are saved on this phone.", color = Lilac, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp))
+        Text("APPEARANCE", color = Lilac, fontSize = 11.sp, letterSpacing = 1.1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 5.dp))
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Card).padding(horizontal = 12.dp, vertical = 6.dp)) {
+            listOf("Violet" to "Stage Violet", "Ocean" to "Ocean Blue", "Emerald" to "Emerald Glow").forEach { (key, label) ->
+                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = library.themeName == key, onClick = { onSelectTheme(key) })
+                    Text(label, color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(start = 5.dp).weight(1f))
+                    Box(Modifier.size(20.dp).clip(CircleShape).background(paletteFor(key).accent))
+                }
+            }
+        }
         if (!library.settingsMessage.isNullOrBlank()) Text(library.settingsMessage, color = if (library.settingsMessage.contains("could not", true) || library.settingsMessage.contains("valid", true)) Orange else Lilac, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp))
         EmptyCard("MIDI playback", "FluidSynth uses the selected SoundFont to play MIDI and KAR songs offline on this device.", Icons.Rounded.Equalizer)
         Text("About JKTV Offline Karaoke · ${BuildConfig.VERSION_NAME}", color = Lilac, fontSize = 12.sp, modifier = Modifier.padding(top = 22.dp))
@@ -498,6 +535,17 @@ private fun SettingsScreen(
             dismissButton = { TextButton(onClick = { showSoundFonts = false }) { Text("Done", color = Lilac) } },
             containerColor = Card
         )
+    }
+}
+
+@Composable
+private fun MixSlider(label: String, value: Float, valueLabel: String, onValueChange: (Float) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Text(valueLabel, color = Lilac, fontSize = 12.sp)
+        }
+        Slider(value = value, onValueChange = onValueChange, valueRange = 0f..1f)
     }
 }
 
