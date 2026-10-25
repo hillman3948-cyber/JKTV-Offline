@@ -9,6 +9,7 @@ JKTV is an Android karaoke player designed to download a MIDI/KAR library and a 
 - The public GitHub repository is `hillman3948-cyber/JKTV-Offline`. Karaoke assets are published as release downloads, not committed into Git history.
 - The home screen can check for signed APK and library releases. APKs are SHA-256 checked before Android's installer opens; library packages have resumable downloads, SHA-256 checks, and staged installation.
 - MIDI/KAR playback is powered on-device by FluidSynth using the installed SF2 SoundFont. Song playback, pause, seek, and timed MIDI lyrics work offline after library setup.
+- Synced lyrics can be embedded in MIDI/KAR files or supplied as a same-name `.lrc` sidecar (for example, `Song.mid` plus `Song.lrc`). The library packager includes sidecars in song archives, and an LRC sidecar overrides embedded lyrics.
 - FluidSynth and wrapper license texts are bundled in the app under `assets/licenses/`.
 - Production in-place APK updates require one stable release keystore. The workflow expects its credentials as GitHub Actions secrets and will not publish a tagged APK without them.
 

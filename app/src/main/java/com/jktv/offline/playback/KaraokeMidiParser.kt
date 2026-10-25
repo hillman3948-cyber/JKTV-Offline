@@ -12,7 +12,41 @@ object KaraokeMidiParser {
     private data class RawLyric(val tick: Long, val text: String)
     private data class Cursor(var position: Int)
 
-    fun parse(file: File): MidiTimeline = parse(file.readBytes())
+    fun parse(file: File): MidiTimeline {
+        val midi = parse(file.readBytes())
+        val sidecar = File(file.parentFile, file.nameWithoutExtension + ".lrc")
+        if (!sidecar.isFile) return midi
+        val externalLyrics = runCatching { parseLrc(sidecar) }.getOrNull().orEmpty()
+        if (externalLyrics.isEmpty()) return midi
+        return midi.copy(lyrics = externalLyrics, hasLyrics = true, hasEventTiming = externalLyrics.size > 1)
+    }
+
+    /** Reads standard timestamped .lrc sidecars; a sidecar takes precedence over embedded text. */
+    private fun parseLrc(file: File): List<TimedLyricEvent> {
+        val contents = file.readText(Charsets.UTF_8).removePrefix("\uFEFF")
+        val offsetMs = Regex("(?im)^\\s*\\[offset\\s*:\\s*([+-]?\\d+)\\s*]\\s*$")
+            .find(contents)?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
+        val timeTag = Regex("\\[(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?]")
+        return contents.lineSequence().flatMap { line ->
+            val tags = timeTag.findAll(line).toList()
+            if (tags.isEmpty()) return@flatMap emptySequence()
+            val text = line.substring(tags.last().range.last + 1).trim()
+            if (text.isBlank()) return@flatMap emptySequence()
+            tags.asSequence().mapNotNull { tag ->
+                val minutes = tag.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+                val seconds = tag.groupValues[2].toLongOrNull() ?: return@mapNotNull null
+                val fraction = tag.groupValues[3]
+                val fractionMs = when (fraction.length) {
+                    1 -> fraction.toLong() * 100L
+                    2 -> fraction.toLong() * 10L
+                    3 -> fraction.toLong()
+                    else -> 0L
+                }
+                val timeMs = (minutes * 60_000L + seconds * 1_000L + fractionMs + offsetMs).coerceAtLeast(0L)
+                TimedLyricEvent(timeMs, text, beginsLine = true)
+            }
+        }.sortedBy { it.timeMs }.toList()
+    }
 
     fun parse(bytes: ByteArray): MidiTimeline {
         require(bytes.size >= 14 && ascii(bytes, 0, 4) == "MThd") { "This is not a Standard MIDI file." }

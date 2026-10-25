@@ -356,7 +356,7 @@ private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowse
                 } else if (playback.lyrics.isEmpty()) {
                     Text("♪", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
                     Text("No timed lyrics in this file", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
-                    Text("This MIDI has no timed lyric events. Choose a .KAR karaoke file to show lyrics; standard MIDI files usually contain music only.", color = Lilac, fontSize = 13.sp, lineHeight = 19.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 7.dp))
+                    Text("No timed lyrics are embedded in this song. Add a same-name .lrc file beside it, or use a lyric-enabled .KAR file.", color = Lilac, fontSize = 13.sp, lineHeight = 19.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 7.dp))
                 } else {
                     Text(currentLyric?.text ?: "♪", color = Color.White, fontSize = 27.sp, lineHeight = 35.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     if (nextLyric != null) Text(nextLyric.text, color = Color.White.copy(alpha = .78f), fontSize = 17.sp, lineHeight = 24.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 18.dp))

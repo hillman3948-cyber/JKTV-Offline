@@ -24,6 +24,11 @@ function Get-Sha256([string] $Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-LyricSidecar([System.IO.FileInfo] $Song) {
+    $path = Join-Path $Song.DirectoryName ($Song.BaseName + '.lrc')
+    if (Test-Path -LiteralPath $path -PathType Leaf) { Get-Item -LiteralPath $path }
+}
+
 function Assert-MidiFile([System.IO.FileInfo] $File) {
     if ($File.Length -lt 14) { throw "MIDI file is too short: $($File.FullName)" }
     $stream = [System.IO.File]::OpenRead($File.FullName)
@@ -54,7 +59,14 @@ function New-SongPackage([System.IO.FileInfo[]] $Files, [string] $SongsRoot, [st
     try {
         $archive = [System.IO.Compression.ZipArchive]::new($fileStream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
         try {
-            foreach ($file in $Files) {
+            $packageFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+            $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($song in $Files) {
+                if ($seen.Add($song.FullName)) { $packageFiles.Add($song) }
+                $lyrics = Get-LyricSidecar $song
+                if ($lyrics -and $seen.Add($lyrics.FullName)) { $packageFiles.Add($lyrics) }
+            }
+            foreach ($file in $packageFiles) {
                 $relative = $file.FullName.Substring($SongsRoot.Length).TrimStart('\').Replace('\', '/')
                 $entry = $archive.CreateEntry($relative, [System.IO.Compression.CompressionLevel]::Optimal)
                 $entry.LastWriteTime = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
@@ -101,25 +113,37 @@ $changedSongs = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
 foreach ($song in $songs) {
     $relative = $song.FullName.Substring($songsRoot.Length).TrimStart('\').Replace('\', '/')
     $sha = Get-Sha256 $song.FullName
+    $lyrics = Get-LyricSidecar $song
+    $lyricsRelative = if ($lyrics) { $lyrics.FullName.Substring($songsRoot.Length).TrimStart('\').Replace('\', '/') } else { '' }
+    $lyricsSha = if ($lyrics) { Get-Sha256 $lyrics.FullName } else { '' }
     $songIdBytes = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($relative.ToLowerInvariant()))
     $songId = [Convert]::ToHexString($songIdBytes).ToLowerInvariant()
-    $row = [ordered]@{ path = $relative; songId = $songId; sizeBytes = $song.Length; sha256 = $sha }
+    $row = [ordered]@{ path = $relative; songId = $songId; sizeBytes = $song.Length; sha256 = $sha; lyricsPath = $lyricsRelative; lyricsSizeBytes = $(if ($lyrics) { $lyrics.Length } else { 0 }); lyricsSha256 = $lyricsSha }
     $indexRows.Add($row)
-    if (-not $previousIndex.ContainsKey($relative) -or $previousIndex[$relative].sha256 -ne $sha) { $changedSongs.Add($song) }
+    $oldLyricsSha = if ($previousIndex.ContainsKey($relative) -and $previousIndex[$relative].PSObject.Properties['lyricsSha256']) { [string]$previousIndex[$relative].lyricsSha256 } else { '' }
+    if (-not $previousIndex.ContainsKey($relative) -or $previousIndex[$relative].sha256 -ne $sha -or $oldLyricsSha -ne $lyricsSha) { $changedSongs.Add($song) }
 }
-$currentPaths = @{}; foreach ($row in $indexRows) { $currentPaths[$row.path] = $true }
+$currentPaths = @{}; $currentRowsByPath = @{}; foreach ($row in $indexRows) { $currentPaths[$row.path] = $true; $currentRowsByPath[$row.path] = $row }
 $deletedFiles = [System.Collections.Generic.List[string]]::new()
 if ($previous) { foreach ($path in @($previous.deletedFiles)) { if (-not $currentPaths.ContainsKey([string]$path)) { $deletedFiles.Add([string]$path) } } }
 foreach ($path in $previousIndex.Keys) { if (-not $currentPaths.ContainsKey($path) -and -not $deletedFiles.Contains($path)) { $deletedFiles.Add($path) } }
+foreach ($path in $previousIndex.Keys) {
+    $oldLyricsPath = if ($previousIndex[$path].PSObject.Properties['lyricsPath']) { [string]$previousIndex[$path].lyricsPath } else { '' }
+    $oldLyricsSha = if ($previousIndex[$path].PSObject.Properties['lyricsSha256']) { [string]$previousIndex[$path].lyricsSha256 } else { '' }
+    $currentLyricsSha = if ($currentRowsByPath.ContainsKey($path)) { [string]$currentRowsByPath[$path].lyricsSha256 } else { '' }
+    if ($oldLyricsPath -and $oldLyricsSha -and -not $currentLyricsSha -and -not $deletedFiles.Contains($oldLyricsPath)) { $deletedFiles.Add($oldLyricsPath) }
+}
 
 $chunks = [System.Collections.Generic.List[object]]::new()
 $chunk = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
 $chunkBytes = 0L
 foreach ($song in $changedSongs) {
-    if ($chunk.Count -gt 0 -and $chunkBytes + $song.Length -gt $MaxPackageBytes) {
+    $lyrics = Get-LyricSidecar $song
+    $songPackageBytes = $song.Length + $(if ($lyrics) { $lyrics.Length } else { 0 })
+    if ($chunk.Count -gt 0 -and $chunkBytes + $songPackageBytes -gt $MaxPackageBytes) {
         $chunks.Add($chunk.ToArray()); $chunk = [System.Collections.Generic.List[System.IO.FileInfo]]::new(); $chunkBytes = 0L
     }
-    $chunk.Add($song); $chunkBytes += $song.Length
+    $chunk.Add($song); $chunkBytes += $songPackageBytes
 }
 if ($chunk.Count -gt 0) { $chunks.Add($chunk.ToArray()) }
 
@@ -132,13 +156,20 @@ for ($i = 0; $i -lt $chunks.Count; $i++) {
     $name = 'songs-v{0}-part-{1:D3}.zip' -f $Version, ($i + 1)
     $destination = Join-Path $releaseDirectory $name
     New-SongPackage -Files $chunks[$i] -SongsRoot $songsRoot -Destination $destination
+    $expandedBytes = 0L
+    $countedLyrics = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($song in $chunks[$i]) {
+        $expandedBytes += $song.Length
+        $lyrics = Get-LyricSidecar $song
+        if ($lyrics -and $countedLyrics.Add($lyrics.FullName)) { $expandedBytes += $lyrics.Length }
+    }
     $record = [ordered]@{
         id = [IO.Path]::GetFileNameWithoutExtension($name)
         filename = $name
         url = $name
         sizeBytes = (Get-Item -LiteralPath $destination).Length
         sha256 = Get-Sha256 $destination
-        expandedSizeBytes = ($chunks[$i] | Measure-Object -Property Length -Sum).Sum
+        expandedSizeBytes = $expandedBytes
         songCount = $chunks[$i].Count
     }
     if ($record.sizeBytes -ge 2GB) { throw "$name exceeds GitHub's 2 GiB per-asset limit." }
