@@ -341,7 +341,9 @@ private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowse
     var videoError by remember(backgroundUri?.toString()) { mutableStateOf<String?>(null) }
     ScreenColumn {
         Header("Now playing", "KARAOKE STAGE")
-        Box(Modifier.fillMaxWidth().weight(1f, fill = false).height(270.dp).clip(RoundedCornerShape(28.dp)).background(Brush.verticalGradient(listOf(Card, Surface))), contentAlignment = Alignment.Center) {
+        // ScreenColumn is a LazyColumn with unbounded height for its item content. A weighted
+        // child there can be measured at 0px, hiding both the video surface and the lyric stage.
+        Box(Modifier.fillMaxWidth().height(270.dp).clip(RoundedCornerShape(28.dp)).background(Brush.verticalGradient(listOf(Card, Surface))), contentAlignment = Alignment.Center) {
             if (backgroundUri != null) {
                 LoopingVideoBackground(backgroundUri, Modifier.fillMaxSize()) { message -> videoError = message }
             }
