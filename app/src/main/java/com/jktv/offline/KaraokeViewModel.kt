@@ -97,8 +97,8 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun playSong(song: SongEntity) = viewModelScope.launch {
-        midiEngine.stop()
         state = state.copy(currentSong = null, error = null, playback = PlaybackState())
+        withContext(Dispatchers.IO) { midiEngine.stop() }
         val app = getApplication<Application>()
         try {
             val soundFont = availableSoundFonts()
@@ -130,10 +130,15 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
 
     fun togglePlayback() {
         if (state.playback.file == null) return
-        if (state.playback.playing) midiEngine.pause() else midiEngine.play()
+        val shouldPause = state.playback.playing
+        viewModelScope.launch(Dispatchers.IO) {
+            if (shouldPause) midiEngine.pause() else midiEngine.play()
+        }
     }
 
-    fun seekPlayback(positionMs: Long) = midiEngine.seek(positionMs)
+    fun seekPlayback(positionMs: Long) {
+        viewModelScope.launch(Dispatchers.IO) { midiEngine.seek(positionMs) }
+    }
 
     fun setBackgroundVideo(uri: Uri) {
         val app = getApplication<Application>()
@@ -247,7 +252,26 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
         val savedFont = preferences.getString(KEY_SOUND_FONT, null)
         val selectedFont = fonts.firstOrNull { it.path == savedFont }
             ?: fonts.sortedByDescending { it.name.contains("default-gm", ignoreCase = true) }.firstOrNull()
-        val backgroundUri = preferences.getString(KEY_BACKGROUND_URI, null)
+        val savedBackgroundUri = preferences.getString(KEY_BACKGROUND_URI, null)
+        val savedBackgroundIsAvailable = savedBackgroundUri?.let { value ->
+            runCatching {
+                val uri = Uri.parse(value)
+                when (uri.scheme) {
+                    "file" -> File(uri.path.orEmpty()).isFile
+                    "content" -> true // Persisted document-picker permission is retained by Android.
+                    else -> false
+                }
+            }.getOrDefault(false)
+        } ?: false
+        val fallbackBackground = videos.firstOrNull()
+        val backgroundUri = if (savedBackgroundIsAvailable) savedBackgroundUri
+            else fallbackBackground?.path?.let { Uri.fromFile(File(it)).toString() }
+        if (!savedBackgroundIsAvailable && fallbackBackground != null) {
+            preferences.edit()
+                .putString(KEY_BACKGROUND_URI, backgroundUri)
+                .putString(KEY_BACKGROUND_NAME, fallbackBackground.name)
+                .apply()
+        }
         state = state.copy(
             songCount = count,
             installed = count > 0,
@@ -257,8 +281,8 @@ class KaraokeViewModel(application: Application) : AndroidViewModel(application)
             soundFonts = fonts,
             selectedSoundFontPath = selectedFont?.path,
             backgroundVideoUri = backgroundUri,
-            backgroundVideoName = preferences.getString(KEY_BACKGROUND_NAME, null)
-                ?: backgroundUri?.substringAfterLast('/')?.substringBefore('?')
+            backgroundVideoName = if (savedBackgroundIsAvailable) preferences.getString(KEY_BACKGROUND_NAME, null)
+                ?: backgroundUri?.substringAfterLast('/')?.substringBefore('?') else fallbackBackground?.name
         )
     }
 

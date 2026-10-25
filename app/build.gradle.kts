@@ -9,8 +9,8 @@ android {
     namespace = "com.jktv.offline"
     compileSdk = 35
 
-    val configuredVersionName = providers.gradleProperty("versionName").orElse("0.3.0").get()
-    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("3").get().toInt()
+    val configuredVersionName = providers.gradleProperty("versionName").orElse("0.3.1").get()
+    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("4").get().toInt()
     val repositoryValue = providers.gradleProperty("jktvGithubRepository")
         .orElse(providers.environmentVariable("GITHUB_REPOSITORY"))
         .orElse("hillman3948-cyber/JKTV-Offline")

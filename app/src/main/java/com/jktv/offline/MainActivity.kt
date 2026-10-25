@@ -84,6 +84,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -325,6 +326,13 @@ private fun QueueScreen(queue: List<QueueRow>, onSongs: () -> Unit, onRemove: (L
 private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowseSongs: () -> Unit, onToggle: () -> Unit, onSeek: (Long) -> Unit) {
     val playback = library.playback
     val duration = playback.durationMs.coerceAtLeast(0L)
+    var isSeeking by remember { mutableStateOf(false) }
+    var sliderValue by remember(playback.file?.absolutePath, duration) {
+        mutableStateOf(if (duration > 0L) (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) else 0f)
+    }
+    LaunchedEffect(playback.positionMs, isSeeking) {
+        if (!isSeeking) sliderValue = if (duration > 0L) (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) else 0f
+    }
     val currentLyricIndex = playback.lyrics.indexOfLast { it.timeMs <= playback.positionMs }
     val displayedLyricIndex = currentLyricIndex.coerceAtLeast(0)
     val currentLyric = playback.lyrics.getOrNull(displayedLyricIndex)
@@ -343,7 +351,7 @@ private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowse
                 } else if (playback.lyrics.isEmpty()) {
                     Text("♪", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
                     Text("No timed lyrics in this file", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
-                    Text("Choose a KAR or MIDI file with embedded lyrics to sing along.", color = Lilac, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 7.dp))
+                    Text("This MIDI has no timed lyric events. Choose a .KAR karaoke file to show lyrics; standard MIDI files usually contain music only.", color = Lilac, fontSize = 13.sp, lineHeight = 19.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 7.dp))
                 } else {
                     Text(currentLyric?.text ?: "♪", color = Color.White, fontSize = 27.sp, lineHeight = 35.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     if (nextLyric != null) Text(nextLyric.text, color = Color.White.copy(alpha = .78f), fontSize = 17.sp, lineHeight = 24.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 18.dp))
@@ -353,7 +361,15 @@ private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowse
         Spacer(Modifier.height(13.dp))
         Text(library.currentSong?.title ?: "Nothing playing", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(library.currentSong?.artist?.ifBlank { "Unknown artist" } ?: "Local MIDI synthesizer · FluidSynth", color = Lilac, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-        Slider(value = if (duration > 0L) (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) else 0f, onValueChange = { if (duration > 0L) onSeek((it * duration).toLong()) }, enabled = playback.file != null && duration > 0L)
+        Slider(
+            value = sliderValue,
+            onValueChange = { sliderValue = it; isSeeking = true },
+            onValueChangeFinished = {
+                if (duration > 0L) onSeek((sliderValue * duration).toLong())
+                isSeeking = false
+            },
+            enabled = playback.file != null && duration > 0L
+        )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(formatPlaybackTime(playback.positionMs), color = Lilac, fontSize = 12.sp)
             Text(formatPlaybackTime(duration), color = Lilac, fontSize = 12.sp)

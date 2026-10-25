@@ -50,7 +50,8 @@ class FluidSynthMidiEngine : MidiEngine {
             val created = MidiFilePlayer(
                 soundFontPath = font.absolutePath,
                 midiPath = file.absolutePath,
-                config = AudioConfig(sampleRate = 44100, interpolation = Interpolation.HIGH)
+                // Medium interpolation keeps CPU use down on entry-level phones while retaining clean playback.
+                config = AudioConfig(sampleRate = 44100, interpolation = Interpolation.NORMAL)
             )
             player = created
             timeline = parsed
@@ -104,7 +105,8 @@ class FluidSynthMidiEngine : MidiEngine {
                         positionMs = position.coerceAtMost(current.durationMs)
                     )
                 }
-                delay(100L)
+                // Avoid forcing the entire Compose screen tree to recompose ten times a second.
+                delay(200L)
             }
         }
     }
