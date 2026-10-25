@@ -9,13 +9,17 @@ android {
     namespace = "com.jktv.offline"
     compileSdk = 35
 
-    val configuredVersionName = providers.gradleProperty("versionName").orElse("0.1.0").get()
-    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("1").get().toInt()
+    val configuredVersionName = providers.gradleProperty("versionName").orElse("0.3.0").get()
+    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("3").get().toInt()
     val repositoryValue = providers.gradleProperty("jktvGithubRepository")
         .orElse(providers.environmentVariable("GITHUB_REPOSITORY"))
         .orElse("hillman3948-cyber/JKTV-Offline")
         .get()
     val githubRepository = repositoryValue.takeIf { Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$").matches(it) }.orEmpty()
+    val libraryManifestUrl = providers.gradleProperty("jktvLibraryManifestUrl")
+        .orElse(providers.environmentVariable("JKTV_LIBRARY_MANIFEST_URL"))
+        .orElse("https://pub-b98e45182dd74f2d84728bc81bad6809.r2.dev/library-manifest.json")
+        .get().trim()
 
     defaultConfig {
         applicationId = providers.gradleProperty("jktvApplicationId")
@@ -25,11 +29,7 @@ android {
         versionCode = configuredVersionCode
         versionName = configuredVersionName
         buildConfigField("String", "GITHUB_REPOSITORY", "\"$githubRepository\"")
-        buildConfigField(
-            "String",
-            "GITHUB_LIBRARY_MANIFEST_URL",
-            "\"${if (githubRepository.isNotEmpty()) "https://github.com/$githubRepository/releases/latest/download/library-manifest.json" else ""}\""
-        )
+        buildConfigField("String", "LIBRARY_MANIFEST_URL", "\"$libraryManifestUrl\"")
     }
 
     buildFeatures {
@@ -41,7 +41,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
 }
 
 dependencies {
@@ -57,9 +62,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    implementation("dev.kotlinds:fluidsynth-kmp:1.1.0")
+    ksp("androidx.room:room-compiler:2.8.5")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
 
@@ -70,10 +76,10 @@ configurations.configureEach {
         "androidx.tracing:tracing:1.2.0",
         "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0",
         "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0",
-        "org.jetbrains.kotlin:kotlin-stdlib:2.0.21",
+        "org.jetbrains.kotlin:kotlin-stdlib:2.3.0",
         "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.20",
         "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.20",
-        "com.google.devtools.ksp:symbol-processing-api:2.0.21-1.0.28",
+        "com.google.devtools.ksp:symbol-processing-api:2.3.0",
         "com.google.guava:guava:33.0.0-jre",
         "androidx.collection:collection:1.4.4",
         "androidx.collection:collection-ktx:1.4.4"

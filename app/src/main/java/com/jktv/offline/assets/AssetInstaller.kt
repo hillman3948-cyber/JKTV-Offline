@@ -67,9 +67,11 @@ class AssetInstaller(context: Context) {
             val json = JSONObject(manifestText)
             val packages = buildList {
                 val fonts = json.optJSONArray("soundfonts")
-                if (fonts != null) for (i in 0 until fonts.length()) add(fonts.getJSONObject(i).toPackage())
+                if (fonts != null) for (i in 0 until fonts.length()) add(fonts.getJSONObject(i).toPackage().resolveAgainst(url))
                 val songs = json.optJSONArray("songPackages")
-                if (songs != null) for (i in 0 until songs.length()) add(songs.getJSONObject(i).toPackage())
+                if (songs != null) for (i in 0 until songs.length()) add(songs.getJSONObject(i).toPackage().resolveAgainst(url))
+                val backgrounds = json.optJSONArray("backgroundVideos")
+                if (backgrounds != null) for (i in 0 until backgrounds.length()) add(backgrounds.getJSONObject(i).toPackage().resolveAgainst(url))
             }
             require(packages.isNotEmpty()) { "The asset manifest has no downloadable packages." }
             require(packages.any { it.fileName.endsWith(".zip", true) } && packages.any { it.fileName.endsWith(".sf2", true) }) {
@@ -80,6 +82,9 @@ class AssetInstaller(context: Context) {
             packages.forEach {
                 safeName(it.fileName)
                 safeName(it.id)
+                require(it.fileName.endsWith(".zip", true) || it.fileName.endsWith(".sf2", true) || it.fileName.endsWith(".mp4", true)) {
+                    "Unsupported library asset: ${it.fileName}"
+                }
                 require(URL(it.url).protocol.equals("https", true)) { "Package URLs must use HTTPS." }
             }
             val minimum = json.optString("minimumAppVersion", "0.1.0")
@@ -148,15 +153,23 @@ class AssetInstaller(context: Context) {
                         val target = File(staging, "songs")
                         target.mkdirs()
                         extractSafely(archive, target)
-                    } else {
+                    } else if (item.fileName.endsWith(".sf2", true)) {
                         val name = safeName(item.fileName)
-                        require(name.endsWith(".sf2", true)) { "Only SF2 SoundFonts are supported by this engine." }
                         val header = ByteArray(12)
                         archive.inputStream().use { input -> require(input.read(header) == header.size) { "The SoundFont file is incomplete." } }
                         require(String(header, 0, 4, Charsets.US_ASCII) == "RIFF" && String(header, 8, 4, Charsets.US_ASCII) == "sfbk") {
                             "${item.fileName} is not a valid SF2 SoundFont."
                         }
                         val target = File(staging, "soundfonts/$name")
+                        target.parentFile?.mkdirs()
+                        archive.copyTo(target, overwrite = true)
+                    } else {
+                        val name = safeName(item.fileName)
+                        val header = ByteArray(12)
+                        archive.inputStream().use { input -> require(input.read(header) == header.size && String(header, 4, 4, Charsets.US_ASCII) == "ftyp") {
+                            "${item.fileName} is not a valid MP4 video."
+                        } }
+                        val target = File(staging, "backgrounds/$name")
                         target.parentFile?.mkdirs()
                         archive.copyTo(target, overwrite = true)
                     }
@@ -167,11 +180,15 @@ class AssetInstaller(context: Context) {
             }
             val packageIds = manifest.packages.map { it.id }.toSet()
             priorManifest?.packages?.filter { it.id !in packageIds }?.forEach { removed ->
-                if (!removed.fileName.endsWith(".zip", true)) File(staging, "soundfonts/${safeName(removed.fileName)}").delete()
+                val oldTarget = assetDestination(staging, removed)
+                if (oldTarget != null && manifest.packages.none { assetDestination(staging, it)?.absolutePath == oldTarget.absolutePath }) oldTarget.delete()
             }
             priorManifest?.packages?.filter { old ->
-                !old.fileName.endsWith(".zip", true) && manifest.packages.any { current -> current.id == old.id && current.sha256 != old.sha256 }
-            }?.forEach { replaced -> File(staging, "soundfonts/${safeName(replaced.fileName)}").delete() }
+                !old.fileName.endsWith(".zip", true) && manifest.packages.any { current -> current.id == old.id && !current.sha256.equals(old.sha256, true) }
+            }?.forEach { replaced ->
+                val oldTarget = assetDestination(staging, replaced)
+                if (oldTarget != null && manifest.packages.none { assetDestination(staging, it)?.absolutePath == oldTarget.absolutePath }) oldTarget.delete()
+            }
             manifest.deletedFiles.forEach { relative -> File(staging, "songs/${safeRelativePath(relative)}").delete() }
             File(staging, "manifest.json").writeText(manifest.toJson().toString(), Charsets.UTF_8)
             activateStaging()
@@ -305,6 +322,8 @@ class AssetInstaller(context: Context) {
         backup.deleteRecursively()
     }
 
+    private fun AssetPackage.resolveAgainst(baseUrl: URL) = copy(url = URL(baseUrl, url).toExternalForm())
+
     private fun JSONObject.toPackage() = AssetPackage(
         id = getString("id"),
         fileName = getString("filename"),
@@ -318,6 +337,7 @@ class AssetInstaller(context: Context) {
         val packages = buildList {
             optJSONArray("soundfonts")?.let { fonts -> for (i in 0 until fonts.length()) add(fonts.getJSONObject(i).toPackage()) }
             optJSONArray("songPackages")?.let { songs -> for (i in 0 until songs.length()) add(songs.getJSONObject(i).toPackage()) }
+            optJSONArray("backgroundVideos")?.let { videos -> for (i in 0 until videos.length()) add(videos.getJSONObject(i).toPackage()) }
         }
         val deletedFiles = buildList {
             optJSONArray("deletedFiles")?.let { entries -> for (i in 0 until entries.length()) add(entries.getString(i)) }
@@ -332,10 +352,20 @@ class AssetInstaller(context: Context) {
             .put("sizeBytes", sizeBytes).put("sha256", sha256).put("expandedSizeBytes", expandedSizeBytes)
         val fonts = packages.filterNot { it.fileName.endsWith(".zip", true) }
         val songs = packages.filter { it.fileName.endsWith(".zip", true) }
+        val backgrounds = packages.filter { it.fileName.endsWith(".mp4", true) }
+        val soundFonts = fonts.filter { it.fileName.endsWith(".sf2", true) }
         return JSONObject().put("app", "JKTV Karaoke").put("libraryVersion", libraryVersion).put("minimumAppVersion", minimumAppVersion)
-            .put("soundfonts", org.json.JSONArray(fonts.map { it.asJson() }))
+            .put("soundfonts", org.json.JSONArray(soundFonts.map { it.asJson() }))
             .put("songPackages", org.json.JSONArray(songs.map { it.asJson() }))
+            .put("backgroundVideos", org.json.JSONArray(backgrounds.map { it.asJson() }))
             .put("deletedFiles", org.json.JSONArray(deletedFiles))
+    }
+
+    private fun assetDestination(base: File, item: AssetPackage): File? = when {
+        item.fileName.endsWith(".zip", true) -> null
+        item.fileName.endsWith(".sf2", true) -> File(base, "soundfonts/${safeName(item.fileName)}")
+        item.fileName.endsWith(".mp4", true) -> File(base, "backgrounds/${safeName(item.fileName)}")
+        else -> null
     }
 
     private fun safeName(name: String): String {

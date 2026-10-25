@@ -8,12 +8,13 @@ JKTV is an Android karaoke player designed to download a MIDI/KAR library and a 
 - The Desktop asset folder currently contains 47,997 `.mid` files (about 2.16 GB) and four `.sf2` SoundFonts (about 494 MB). Header checks passed; they do not prove every file is fully parseable.
 - The public GitHub repository is `hillman3948-cyber/JKTV-Offline`. Karaoke assets are published as release downloads, not committed into Git history.
 - The home screen can check for signed APK and library releases. APKs are SHA-256 checked before Android's installer opens; library packages have resumable downloads, SHA-256 checks, and staged installation.
-- The native MIDI synthesizer is still not integrated, so songs cannot play yet.
+- MIDI/KAR playback is powered on-device by FluidSynth using the installed SF2 SoundFont. Song playback, pause, seek, and timed MIDI lyrics work offline after library setup.
+- FluidSynth and wrapper license texts are bundled in the app under `assets/licenses/`.
 - Production in-place APK updates require one stable release keystore. The workflow expects its credentials as GitHub Actions secrets and will not publish a tagged APK without them.
 
 ## GitHub release layout
 
-The repository contains Android source, workflow files, manifests, documentation, and developer tooling. Karaoke files are excluded from Git and uploaded as versioned GitHub Release assets. App releases use `app-vX.Y.Z`; library releases use `library-vX.Y.Z`. App releases are marked as prereleases so the stable `releases/latest/download/library-manifest.json` URL continues to resolve to the current library manifest.
+The repository contains Android source, workflow files, manifests, documentation, and developer tooling. Karaoke files are excluded from Git and hosted in the Cloudflare R2 bucket `jktv-offline-library`; the Android source and APK releases remain on GitHub. The app reads the library manifest from Cloudflare R2 at `https://pub-b98e45182dd74f2d84728bc81bad6809.r2.dev/library-manifest.json`; the URL can be overridden with `jktvLibraryManifestUrl` during the build.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for GitHub release and Android build instructions. The repository is public so the app can download assets without embedded credentials. The owner confirmed permission to redistribute these songs and SoundFonts.
 

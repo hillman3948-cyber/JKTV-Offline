@@ -1,4 +1,4 @@
-# GitHub-only deployment
+# Deployment: GitHub app releases and Cloudflare R2 library
 
 ## Before publishing
 
@@ -7,8 +7,17 @@
 3. Create one long-lived Android release keystore, keep its backup offline, and add these Actions secrets: `ANDROID_KEYSTORE_B64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEYSTORE_PASSWORD`, and `ANDROID_KEY_PASSWORD`. Never commit the keystore or passwords. The existing debug APK is not a production-signed release.
 4. Push the Android source to the repository's `main` branch. `android-ci.yml` builds a debug APK on pushes and pull requests.
 
-The repository and library release are public. The owner approved that visibility and confirmed asset redistribution rights. A production APK release still requires the signing secrets above.
+The Android source and APK release metadata stay on GitHub. The MIDI/KAR packages, SoundFonts, background videos, and library manifest are hosted in the Cloudflare R2 bucket `jktv-offline-library`; downloads are public to anyone who has a file URL. Keep `source-index.json` private and out of the bucket. A production APK release still requires the signing secrets above.
 
+## Configure the R2 library endpoint
+
+The app reads the manifest URL from the Gradle property `jktvLibraryManifestUrl` (or environment variable `JKTV_LIBRARY_MANIFEST_URL`). The current public R2 manifest address is `https://pub-b98e45182dd74f2d84728bc81bad6809.r2.dev/library-manifest.json`. For a local APK build, use:
+
+```powershell
+gradle --no-daemon :app:assembleDebug -PjktvLibraryManifestUrl='https://pub-b98e45182dd74f2d84728bc81bad6809.r2.dev/library-manifest.json'
+```
+
+Do not use the S3 API endpoint or dashboard object-detail links. Use the public bucket URL, which points to `library-manifest.json`. Manifest package `url` fields can be relative paths; the Android installer resolves them against the manifest's public URL. Keep the BGV objects under the `bgv/` prefix and upload the updated `library-manifest.json` at the bucket root. The app then downloads and verifies each video with the song and SoundFont packages. Never put R2 S3 access keys in the APK.
 ## Build and release APKs
 
 The `app-release.yml` workflow builds on tags like `app-v1.0.0`, signs the APK using the four Actions secrets, verifies the signature, creates a SHA-256 file, and publishes a GitHub prerelease. App releases are prereleases so the stable `latest` release can remain the current library release.
@@ -17,7 +26,7 @@ Use a monotonically increasing `versionCode` for every uploaded APK. The workflo
 
 ## Package and publish library updates
 
-The packager defaults to the Desktop asset folder, includes all `.sf2` files, and packages only new or modified songs relative to the previous source index. It maintains a cumulative manifest, adds deletion tombstones, and keeps old release URLs for unchanged packages. Song archives default to at most 128 MiB of uncompressed source files, below GitHub's 2 GiB per-release-asset size limit.
+The packager defaults to the Desktop asset folder, includes all `.sf2` files, indexes `.mp4` files from `bgv/`, and packages only new or modified songs relative to the previous source index. It maintains a cumulative manifest and adds deletion tombstones. Upload new or changed video files from the local `bgv/` folder under the R2 `bgv/` prefix, then replace the root `library-manifest.json`; GitHub may continue to host Android source and APK releases.
 
 Prepare the first release locally:
 
@@ -49,7 +58,7 @@ For the next release, pass the previous manifest and source index:
   -PreviousIndexPath '.\build\assets\library-v1.0.0\source-index.json'
 ```
 
-The script invokes `gh` only when `-Publish` is supplied. After the first stable library release, the app manifest URL is:
+The legacy `publish-github-assets.ps1` script still invokes `gh` only when `-Publish` is supplied. The current app should be built with the R2 manifest URL from the Cloudflare dashboard. The old GitHub library URL remains:
 
 ```text
 https://github.com/hillman3948-cyber/JKTV-Offline/releases/latest/download/library-manifest.json

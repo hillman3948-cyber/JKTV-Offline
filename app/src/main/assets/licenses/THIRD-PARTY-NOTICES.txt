@@ -1,0 +1,4 @@
+JKTV Offline Karaoke includes fluidsynth-kmp 1.1.0, which bundles FluidSynth 2.5.3 Android native libraries.
+The fluidsynth-kmp wrapper is licensed under Apache License 2.0; see FLUIDSYNTH-KMP-APACHE-2.0.txt.
+The bundled FluidSynth native library is licensed under GNU Lesser General Public License 2.1; see FLUIDSYNTH-LGPL-2.1.txt.
+Upstream projects: https://github.com/kotlinds/fluidsynth-kmp and https://github.com/FluidSynth/fluidsynth

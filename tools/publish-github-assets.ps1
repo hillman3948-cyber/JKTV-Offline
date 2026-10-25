@@ -69,6 +69,7 @@ function New-SongPackage([System.IO.FileInfo[]] $Files, [string] $SongsRoot, [st
 $repoSlug = if ($RepoOwner) { "$RepoOwner/$Repository" } else { '' }
 $songsRoot = Join-Path $SourceRoot 'songs'
 $soundFontRoot = Join-Path $SourceRoot 'SoundFont'
+$backgroundVideoRoot = Join-Path $SourceRoot 'bgv'
 if (-not (Test-Path -LiteralPath $songsRoot -PathType Container)) { throw "Song directory not found: $songsRoot" }
 if (-not (Test-Path -LiteralPath $soundFontRoot -PathType Container)) { throw "SoundFont directory not found: $soundFontRoot" }
 if ($MaxPackageBytes -lt 1MB -or $MaxPackageBytes -ge 2GB) { throw "MaxPackageBytes must be at least 1 MiB and below GitHub Releases' per-file limit of 2 GiB." }
@@ -134,7 +135,7 @@ for ($i = 0; $i -lt $chunks.Count; $i++) {
     $record = [ordered]@{
         id = [IO.Path]::GetFileNameWithoutExtension($name)
         filename = $name
-        url = "$assetBase/$name"
+        url = $name
         sizeBytes = (Get-Item -LiteralPath $destination).Length
         sha256 = Get-Sha256 $destination
         expandedSizeBytes = ($chunks[$i] | Measure-Object -Property Length -Sum).Sum
@@ -154,19 +155,39 @@ foreach ($font in $fonts) {
     $fontName = "$fontId-v$Version.sf2"
     $fontCopy = Join-Path $releaseDirectory $fontName
     Copy-Item -LiteralPath $font.FullName -Destination $fontCopy -Force
-    $soundFonts.Add([ordered]@{ id = $fontId; filename = $fontName; url = "$assetBase/$fontName"; sizeBytes = (Get-Item -LiteralPath $fontCopy).Length; sha256 = $fontSha })
+    $soundFonts.Add([ordered]@{ id = $fontId; filename = $fontName; url = $fontName; sizeBytes = (Get-Item -LiteralPath $fontCopy).Length; sha256 = $fontSha })
     $uploadPaths.Add($fontCopy)
+}
+
+$backgroundVideos = [System.Collections.Generic.List[object]]::new()
+if (Test-Path -LiteralPath $backgroundVideoRoot -PathType Container) {
+    $videos = @(Get-ChildItem -LiteralPath $backgroundVideoRoot -File -Recurse | Where-Object { $_.Extension -ieq '.mp4' } | Sort-Object FullName)
+    foreach ($video in $videos) {
+        $relative = $video.FullName.Substring($backgroundVideoRoot.Length).TrimStart('\').Replace('\', '/')
+        $videoIdPart = [IO.Path]::GetFileNameWithoutExtension($relative).ToLowerInvariant() -replace '[^a-z0-9]+', '-'
+        $videoId = "bgv-$($videoIdPart.Trim('-'))"
+        if ($backgroundVideos.id -contains $videoId) { throw "BGV names must be unique: $relative" }
+        $videoSha = Get-Sha256 $video.FullName
+        $backgroundVideos.Add([ordered]@{
+            id = $videoId
+            filename = [IO.Path]::GetFileName($relative)
+            url = "bgv/$relative"
+            sizeBytes = $video.Length
+            sha256 = $videoSha
+        })
+    }
 }
 
 $manifest = [ordered]@{
     formatVersion = 1
     app = 'JKTV Karaoke'
     libraryVersion = $Version
-    minimumAppVersion = '0.1.0'
+    minimumAppVersion = '0.3.0'
     generatedUtc = [DateTime]::UtcNow.ToString('o')
     songCount = $songs.Count
     soundfonts = @($soundFonts.ToArray())
     songPackages = @($songPackages.ToArray())
+    backgroundVideos = @($backgroundVideos.ToArray())
     deletedFiles = @($deletedFiles | Sort-Object -Unique)
 }
 $manifestPath = Join-Path $releaseDirectory 'library-manifest.json'
@@ -176,7 +197,7 @@ $indexPath = Join-Path $releaseDirectory 'source-index.json'
 ([ordered]@{ libraryVersion = $Version; sourceFiles = @($indexRows.ToArray()) } | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $indexPath -Encoding UTF8
 
 Write-Output "Scanned $($songs.Count) MID/MIDI/KAR files. Changed or new songs: $($changedSongs.Count). Removed paths: $($deletedFiles.Count)."
-Write-Output "Created $($chunks.Count) song archive(s) and included $($soundFonts.Count) SF2 SoundFonts: $(($fonts.Name) -join ', ')."
+Write-Output "Created $($chunks.Count) song archive(s), included $($soundFonts.Count) SF2 SoundFonts, and indexed $($backgroundVideos.Count) BGV MP4 videos."
 Write-Output "Local output: $releaseDirectory"
 Write-Output "Manifest URL after publishing: https://github.com/$(if($repoSlug){$repoSlug}else{'OWNER/JKTV-Offline'})/releases/latest/download/library-manifest.json"
 

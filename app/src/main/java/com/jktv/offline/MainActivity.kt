@@ -1,6 +1,15 @@
 package com.jktv.offline
 
+import android.content.Intent
+import android.graphics.Matrix
+import android.graphics.SurfaceTexture
+import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Bundle
+import android.view.Surface
+import android.view.TextureView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
@@ -24,6 +33,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -41,12 +52,14 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
@@ -56,16 +69,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -76,12 +92,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jktv.offline.data.QueueRow
 import com.jktv.offline.data.SongEntity
@@ -115,7 +133,17 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun JktvApp() {
     val viewModel: KaraokeViewModel = viewModel()
+    val context = LocalContext.current
     val library = viewModel.state
+    val backgroundPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            viewModel.setBackgroundVideo(uri)
+        }
+    }
+    val soundFontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) viewModel.importSoundFont(uri)
+    }
     var page by rememberSaveable { mutableStateOf(Page.Home.name) }
     var setupOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -163,11 +191,19 @@ private fun JktvApp() {
                 Box(Modifier.fillMaxSize().padding(insets)) {
                     if (isSetup) SetupScreen(library, viewModel, onBack = { setupOpen = false })
                     else when (activePage) {
-                        Page.Home -> HomeScreen(library, onSetup = { setupOpen = true }, onSongs = { page = Page.Songs.name }, onFavorite = { viewModel.setFavorite(it); Unit }, onAdd = { song, singer -> viewModel.addToQueue(song, singer); Unit }, onCheckUpdates = { viewModel.checkForUpdates() })
-                        Page.Songs -> SongsScreen(library, query, onQuery = { query = it; viewModel.search(it) }, onSetup = { setupOpen = true }, onFavorite = { viewModel.setFavorite(it); Unit }, onAdd = { song, singer -> viewModel.addToQueue(song, singer); Unit })
+                        Page.Home -> HomeScreen(library, onSetup = { setupOpen = true }, onSongs = { page = Page.Songs.name }, onFavorite = { viewModel.setFavorite(it); Unit }, onAdd = { song, singer -> viewModel.addToQueue(song, singer); Unit }, onPlay = { viewModel.playSong(it); page = Page.Playing.name }, onCheckUpdates = { viewModel.checkForUpdates() })
+                        Page.Songs -> SongsScreen(library, query, onQuery = { query = it; viewModel.search(it) }, onSetup = { setupOpen = true }, onFavorite = { viewModel.setFavorite(it); Unit }, onAdd = { song, singer -> viewModel.addToQueue(song, singer); Unit }, onPlay = { viewModel.playSong(it); page = Page.Playing.name })
                         Page.Queue -> QueueScreen(library.queue, onSongs = { page = Page.Songs.name }, onRemove = { viewModel.removeFromQueue(it); Unit }, onMove = { id, direction -> viewModel.moveQueueItem(id, direction); Unit }, onClear = { viewModel.clearQueue(); Unit })
-                        Page.Playing -> PlayingScreen(library, onSetup = { setupOpen = true })
-                        Page.Settings -> SettingsScreen(onSetup = { setupOpen = true })
+                        Page.Playing -> PlayingScreen(library, onSetup = { setupOpen = true }, onBrowseSongs = { page = Page.Songs.name }, onToggle = { viewModel.togglePlayback() }, onSeek = { viewModel.seekPlayback(it) })
+                        Page.Settings -> SettingsScreen(
+                            library = library,
+                            onSetup = { setupOpen = true },
+                            onPickBackgroundFromPhone = { backgroundPicker.launch(arrayOf("video/*")) },
+                            onSelectDownloadedBackground = { viewModel.selectDownloadedBackground(it) },
+                            onClearBackground = { viewModel.clearBackgroundVideo() },
+                            onSelectSoundFont = { viewModel.selectSoundFont(it) },
+                            onImportSoundFont = { soundFontPicker.launch(arrayOf("*/*")) }
+                        )
                     }
                 }
             }
@@ -185,7 +221,7 @@ private fun JktvApp() {
 }
 
 @Composable
-private fun HomeScreen(library: LibraryUiState, onSetup: () -> Unit, onSongs: () -> Unit, onFavorite: (SongEntity) -> Unit, onAdd: (SongEntity, String) -> Unit, onCheckUpdates: () -> Unit) {
+private fun HomeScreen(library: LibraryUiState, onSetup: () -> Unit, onSongs: () -> Unit, onFavorite: (SongEntity) -> Unit, onAdd: (SongEntity, String) -> Unit, onPlay: (SongEntity) -> Unit, onCheckUpdates: () -> Unit) {
     ScreenColumn {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(46.dp).clip(RoundedCornerShape(16.dp)).background(Neon), contentAlignment = Alignment.Center) {
@@ -228,13 +264,13 @@ private fun HomeScreen(library: LibraryUiState, onSetup: () -> Unit, onSongs: ()
             StatCard("SOUND", if (library.installed) "Installed" else "Not installed", Icons.Rounded.Equalizer, Modifier.weight(1f))
         }
         SectionTitle("Your library", "Browse songs", onSongs)
-        if (library.songs.isNotEmpty()) SongCard(library.songs.first(), onFavorite = { onFavorite(library.songs.first()) }, onAdd = { singer -> onAdd(library.songs.first(), singer) })
+        if (library.songs.isNotEmpty()) SongCard(library.songs.first(), onFavorite = { onFavorite(library.songs.first()) }, onAdd = { singer -> onAdd(library.songs.first(), singer) }, onPlay = { onPlay(library.songs.first()) })
         else EmptyCard("No songs installed yet", "Download the library once to start singing offline.", Icons.Rounded.Album)
     }
 }
 
 @Composable
-private fun SongsScreen(library: LibraryUiState, query: String, onQuery: (String) -> Unit, onSetup: () -> Unit, onFavorite: (SongEntity) -> Unit, onAdd: (SongEntity, String) -> Unit) {
+private fun SongsScreen(library: LibraryUiState, query: String, onQuery: (String) -> Unit, onSetup: () -> Unit, onFavorite: (SongEntity) -> Unit, onAdd: (SongEntity, String) -> Unit, onPlay: (SongEntity) -> Unit) {
     ScreenColumn {
         Header("Songs", "OFFLINE LIBRARY")
         SearchField(query, onQuery)
@@ -244,7 +280,7 @@ private fun SongsScreen(library: LibraryUiState, query: String, onQuery: (String
             PrimaryAction("Install song library", onSetup)
         } else {
             Text("${library.songCount} songs · showing ${library.songs.size}", color = Lilac, fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp))
-            library.songs.forEach { song -> SongCard(song, onFavorite = { onFavorite(song) }, onAdd = { singer -> onAdd(song, singer) }) }
+            library.songs.forEach { song -> SongCard(song, onFavorite = { onFavorite(song) }, onAdd = { singer -> onAdd(song, singer) }, onPlay = { onPlay(song) }) }
         }
     }
 }
@@ -286,34 +322,227 @@ private fun QueueScreen(queue: List<QueueRow>, onSongs: () -> Unit, onRemove: (L
 }
 
 @Composable
-private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit) {
+private fun PlayingScreen(library: LibraryUiState, onSetup: () -> Unit, onBrowseSongs: () -> Unit, onToggle: () -> Unit, onSeek: (Long) -> Unit) {
+    val playback = library.playback
+    val duration = playback.durationMs.coerceAtLeast(0L)
+    val currentLyricIndex = playback.lyrics.indexOfLast { it.timeMs <= playback.positionMs }
+    val displayedLyricIndex = currentLyricIndex.coerceAtLeast(0)
+    val currentLyric = playback.lyrics.getOrNull(displayedLyricIndex)
+    val nextLyric = playback.lyrics.getOrNull(displayedLyricIndex + 1)
+    val backgroundUri = library.backgroundVideoUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
     ScreenColumn {
         Header("Now playing", "KARAOKE STAGE")
-        Box(Modifier.fillMaxWidth().weight(1f, fill = false).height(250.dp).clip(RoundedCornerShape(28.dp)).background(Brush.verticalGradient(listOf(Card, Surface))), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-                Text("♪", color = Violet, fontSize = 32.sp)
-                Text("Your lyrics will shine here", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-                Text("Choose a song to begin", color = Lilac, fontSize = 14.sp, modifier = Modifier.padding(top = 7.dp))
+        Box(Modifier.fillMaxWidth().weight(1f, fill = false).height(270.dp).clip(RoundedCornerShape(28.dp)).background(Brush.verticalGradient(listOf(Card, Surface))), contentAlignment = Alignment.Center) {
+            if (backgroundUri != null) LoopingVideoBackground(backgroundUri, Modifier.fillMaxSize())
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (backgroundUri == null) 0.08f else 0.48f)))
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.padding(24.dp)) {
+                if (playback.file == null) {
+                    Text("♪", color = Violet, fontSize = 32.sp)
+                    Text("Choose a song to begin", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+                    Text("Timed lyrics appear here when the song includes them", color = Lilac, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 7.dp))
+                } else if (playback.lyrics.isEmpty()) {
+                    Text("♪", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                    Text("No timed lyrics in this file", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
+                    Text("Choose a KAR or MIDI file with embedded lyrics to sing along.", color = Lilac, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 7.dp))
+                } else {
+                    Text(currentLyric?.text ?: "♪", color = Color.White, fontSize = 27.sp, lineHeight = 35.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    if (nextLyric != null) Text(nextLyric.text, color = Color.White.copy(alpha = .78f), fontSize = 17.sp, lineHeight = 24.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 18.dp))
+                }
             }
         }
-        Spacer(Modifier.height(20.dp))
-        Text(if (library.installed) "PLAYBACK ENGINE UNAVAILABLE" else "NO SONG LIBRARY", color = Lilac, fontSize = 11.sp, letterSpacing = 1.3.sp)
-        Text(if (library.installed) "The native MIDI engine must be integrated before songs can play." else "Install your offline library to prepare this stage.", color = Color.White, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 7.dp))
+        Spacer(Modifier.height(13.dp))
+        Text(library.currentSong?.title ?: "Nothing playing", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(library.currentSong?.artist?.ifBlank { "Unknown artist" } ?: "Local MIDI synthesizer · FluidSynth", color = Lilac, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+        Slider(value = if (duration > 0L) (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) else 0f, onValueChange = { if (duration > 0L) onSeek((it * duration).toLong()) }, enabled = playback.file != null && duration > 0L)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(formatPlaybackTime(playback.positionMs), color = Lilac, fontSize = 12.sp)
+            Text(formatPlaybackTime(duration), color = Lilac, fontSize = 12.sp)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBrowseSongs) { Icon(Icons.Rounded.LibraryMusic, "Browse songs", tint = Lilac) }
+            IconButton(onClick = onToggle, enabled = playback.file != null, modifier = Modifier.size(72.dp).clip(CircleShape).background(Violet)) {
+                Icon(if (playback.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playback.playing) "Pause" else "Play", tint = Color.White, modifier = Modifier.size(38.dp))
+            }
+        }
+        if (!library.error.isNullOrBlank() && playback.file == null) Text(library.error, color = Orange, fontSize = 13.sp, lineHeight = 19.sp)
         if (!library.installed) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
             PrimaryAction("Set up offline library", onSetup)
         }
     }
 }
 
 @Composable
-private fun SettingsScreen(onSetup: () -> Unit) {
+private fun SettingsScreen(
+    library: LibraryUiState,
+    onSetup: () -> Unit,
+    onPickBackgroundFromPhone: () -> Unit,
+    onSelectDownloadedBackground: (String) -> Unit,
+    onClearBackground: () -> Unit,
+    onSelectSoundFont: (String) -> Unit,
+    onImportSoundFont: () -> Unit
+) {
+    var showSoundFonts by rememberSaveable { mutableStateOf(false) }
+    var showBackgroundVideos by rememberSaveable { mutableStateOf(false) }
+    val selectedFont = library.soundFonts.firstOrNull { it.path == library.selectedSoundFontPath }
+
     ScreenColumn {
         Header("Settings", "MAKE IT YOURS")
         SettingRow("Offline library", "Download or check for song updates", Icons.Rounded.LibraryMusic, onSetup)
-        EmptyCard("Playback engine pending", "SoundFont selection, key and tempo controls, and audio effects will be available after the native synthesizer is integrated.", Icons.Rounded.Equalizer)
+        Text("KARAOKE DISPLAY", color = Lilac, fontSize = 11.sp, letterSpacing = 1.1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 4.dp))
+        SettingRow("Background video", library.backgroundVideoName ?: "No video selected", Icons.Rounded.VideoLibrary, { showBackgroundVideos = true })
+        if (library.backgroundVideoUri != null) {
+            TextButton(onClick = onClearBackground, modifier = Modifier.align(Alignment.End)) { Text("Clear background", color = Lilac) }
+        }
+        Text("Choose a video saved on your phone. It loops silently behind the lyrics.", color = Lilac, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp))
+        Text("MIDI AUDIO", color = Lilac, fontSize = 11.sp, letterSpacing = 1.1.sp, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+        SettingRow("SoundFont", selectedFont?.name ?: "Set up the library or import an SF2 file", Icons.Rounded.Equalizer, { showSoundFonts = true })
+        if (!library.settingsMessage.isNullOrBlank()) Text(library.settingsMessage, color = if (library.settingsMessage.contains("could not", true) || library.settingsMessage.contains("valid", true)) Orange else Lilac, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp))
+        EmptyCard("MIDI playback", "FluidSynth uses the selected SoundFont to play MIDI and KAR songs offline on this device.", Icons.Rounded.Equalizer)
         Text("About JKTV Offline Karaoke · ${BuildConfig.VERSION_NAME}", color = Lilac, fontSize = 12.sp, modifier = Modifier.padding(top = 22.dp))
     }
+
+    if (showBackgroundVideos) {
+        AlertDialog(
+            onDismissRequest = { showBackgroundVideos = false },
+            title = { Text("Choose a background video", color = Color.White) },
+            text = {
+                Column(Modifier.heightIn(max = 380.dp)) {
+                    Text("Videos included in your downloaded library work offline.", color = Lilac, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    if (library.backgroundVideos.isEmpty()) {
+                        Text("No R2 background videos are installed yet. Download the updated library, or choose a video from this phone.", color = Lilac, fontSize = 14.sp, lineHeight = 21.sp)
+                    } else {
+                        LazyColumn(Modifier.weight(1f, fill = false)) {
+                            items(library.backgroundVideos) { video ->
+                                val selected = library.backgroundVideoUri?.let { Uri.parse(it).path == video.path } == true
+                                androidx.compose.material3.Surface(
+                                    onClick = { showBackgroundVideos = false; onSelectDownloadedBackground(video.path) },
+                                    color = Card,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                ) {
+                                    Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        RadioButton(selected = selected, onClick = { showBackgroundVideos = false; onSelectDownloadedBackground(video.path) })
+                                        Text(video.name, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBackgroundVideos = false; onPickBackgroundFromPhone() }) { Text("Choose from phone", color = Violet) }
+            },
+            dismissButton = { TextButton(onClick = { showBackgroundVideos = false }) { Text("Done", color = Lilac) } },
+            containerColor = Card
+        )
+    }
+
+    if (showSoundFonts) {
+        AlertDialog(
+            onDismissRequest = { showSoundFonts = false },
+            title = { Text("Choose a SoundFont", color = Color.White) },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp)) {
+                    Text("Select an installed SF2 bank or import one from this phone.", color = Lilac, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    if (library.soundFonts.isEmpty()) {
+                        Text("No SoundFonts are installed yet. Finish offline library setup or import an .sf2 file.", color = Lilac, fontSize = 14.sp, lineHeight = 21.sp)
+                    } else {
+                        LazyColumn {
+                            items(library.soundFonts.size) { index ->
+                                val font = library.soundFonts[index]
+                                androidx.compose.material3.Surface(
+                                    onClick = { showSoundFonts = false; onSelectSoundFont(font.path) },
+                                    color = Card,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                ) {
+                                    Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        RadioButton(selected = font.path == library.selectedSoundFontPath, onClick = { showSoundFonts = false; onSelectSoundFont(font.path) })
+                                        Text(font.name, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSoundFonts = false; onImportSoundFont() }) { Text("Import SF2", color = Violet) }
+            },
+            dismissButton = { TextButton(onClick = { showSoundFonts = false }) { Text("Done", color = Lilac) } },
+            containerColor = Card
+        )
+    }
+}
+
+@Composable
+private fun LoopingVideoBackground(uri: Uri, modifier: Modifier = Modifier) {
+    key(uri.toString()) {
+        AndroidView(
+            modifier = modifier,
+            factory = { context ->
+                TextureView(context).apply {
+                    isOpaque = false
+                    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                        private var player: MediaPlayer? = null
+                        private var outputSurface: Surface? = null
+
+                        override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
+                            val surface = Surface(surfaceTexture)
+                            val mediaPlayer = MediaPlayer()
+                            outputSurface = surface
+                            player = mediaPlayer
+                            try {
+                                mediaPlayer.setSurface(surface)
+                                mediaPlayer.setDataSource(context, uri)
+                                mediaPlayer.isLooping = true
+                                mediaPlayer.setVolume(0f, 0f)
+                                mediaPlayer.setOnVideoSizeChangedListener { _, videoWidth, videoHeight ->
+                                    applyVideoCenterCrop(this@apply, videoWidth, videoHeight)
+                                }
+                                mediaPlayer.setOnPreparedListener { prepared ->
+                                    applyVideoCenterCrop(this@apply, prepared.videoWidth, prepared.videoHeight)
+                                    prepared.start()
+                                }
+                                mediaPlayer.setOnErrorListener { failedPlayer, _, _ ->
+                                    runCatching { failedPlayer.release() }
+                                    true
+                                }
+                                mediaPlayer.prepareAsync()
+                            } catch (_: Exception) {
+                                runCatching { mediaPlayer.release() }
+                                runCatching { surface.release() }
+                            }
+                        }
+
+                        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                            player?.let { applyVideoCenterCrop(this@apply, it.videoWidth, it.videoHeight) }
+                        }
+
+                        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                            player?.let { active -> runCatching { active.stop() }; runCatching { active.release() } }
+                            player = null
+                            outputSurface?.let { runCatching { it.release() } }
+                            outputSurface = null
+                            return true
+                        }
+
+                        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+                    }
+                }
+            }
+        )
+    }
+}
+
+private fun applyVideoCenterCrop(view: TextureView, videoWidth: Int, videoHeight: Int) {
+    if (videoWidth <= 0 || videoHeight <= 0 || view.width <= 0 || view.height <= 0) return
+    val scale = maxOf(view.width.toFloat() / videoWidth, view.height.toFloat() / videoHeight)
+    val x = (view.width - videoWidth * scale) / 2f
+    val y = (view.height - videoHeight * scale) / 2f
+    view.setTransform(Matrix().apply { setScale(scale, scale); postTranslate(x, y) })
 }
 
 @Composable
@@ -352,10 +581,10 @@ private fun UpdateDialog(
                     lineHeight = 20.sp
                 )
                 if (update != null && libraryUpdate != null) {
-                    Text("Song packages: ${libraryUpdate.packages.count { it.fileName.endsWith(".zip", true) }} · SoundFonts: ${libraryUpdate.packages.count { it.fileName.endsWith(".sf2", true) }} · new download ${formatBytes(library.libraryUpdateDownloadBytes ?: 0L)}", color = Lilac, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+                    Text("Song packages: ${libraryUpdate.packages.count { it.fileName.endsWith(".zip", true) }} · SoundFonts: ${libraryUpdate.packages.count { it.fileName.endsWith(".sf2", true) }} · Background videos: ${libraryUpdate.packages.count { it.fileName.endsWith(".mp4", true) }} · new download ${formatBytes(library.libraryUpdateDownloadBytes ?: 0L)}", color = Lilac, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
                 }
                 if (update == null && libraryUpdate != null) {
-                    Text("Song packages: ${libraryUpdate.packages.count { it.fileName.endsWith(".zip", true) }} · SoundFonts: ${libraryUpdate.packages.count { it.fileName.endsWith(".sf2", true) }} · new download ${formatBytes(library.libraryUpdateDownloadBytes ?: 0L)}", color = Lilac, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+                    Text("Song packages: ${libraryUpdate.packages.count { it.fileName.endsWith(".zip", true) }} · SoundFonts: ${libraryUpdate.packages.count { it.fileName.endsWith(".sf2", true) }} · Background videos: ${libraryUpdate.packages.count { it.fileName.endsWith(".mp4", true) }} · new download ${formatBytes(library.libraryUpdateDownloadBytes ?: 0L)}", color = Lilac, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
                 }
                 if (library.updateCheckBusy || library.updateDownloadBusy) {
                     LinearProgressIndicator(
@@ -397,63 +626,164 @@ private fun UpdateDialog(
 
 @Composable
 private fun SetupScreen(library: LibraryUiState, viewModel: KaraokeViewModel, onBack: () -> Unit) {
-    var manifestUrl by rememberSaveable { mutableStateOf(BuildConfig.GITHUB_LIBRARY_MANIFEST_URL) }
+    val manifestUrl = BuildConfig.LIBRARY_MANIFEST_URL.trim()
+    val manifestReady = library.checkedManifestUrl == manifestUrl && library.requiredBytes != null
+    val hasEnoughStorage = library.availableBytes != null && library.requiredBytes != null && library.availableBytes >= library.requiredBytes
+    val canDownload = manifestReady && hasEnoughStorage && !library.busy && manifestUrl.isNotBlank()
+
+    LaunchedEffect(manifestUrl) {
+        if (manifestUrl.isNotBlank() && library.checkedManifestUrl != manifestUrl && !library.busy) {
+            viewModel.inspectManifest(manifestUrl)
+        }
+    }
+
     ScreenColumn {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) { Text("‹", color = Color.White, fontSize = 32.sp) }
             Column(Modifier.padding(start = 8.dp)) {
-                Text("Prepare your library", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                Text("Get your library", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
                 Text("OFFLINE SETUP", color = Lilac, fontSize = 11.sp, letterSpacing = 1.5.sp)
             }
         }
-        Spacer(Modifier.height(24.dp))
+
+        Spacer(Modifier.height(20.dp))
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                Modifier.size(92.dp).clip(RoundedCornerShape(30.dp)).background(Neon),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White, modifier = Modifier.size(54.dp))
+            }
+            Text("JKTV KARAOKE", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp, modifier = Modifier.padding(top = 16.dp))
+            Text("OFFLINE LIBRARY", color = Violet, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, modifier = Modifier.padding(top = 4.dp))
+            Text(
+                "Download your songs and sounds once, then sing anytime — even offline.",
+                color = Color.White,
+                fontSize = 17.sp,
+                lineHeight = 24.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 17.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+
+        Spacer(Modifier.height(22.dp))
         GradientCard {
             Column(Modifier.padding(20.dp)) {
-                Text("JKTV KARAOKE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp)
-                Text("Preparing your offline karaoke experience", color = Lilac, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
-                Spacer(Modifier.height(20.dp))
-                SetupItem("MIDI/KAR song library", if (library.installed) "Installed" else "Needed")
-                SetupItem("SoundFont instrument bank", if (library.installed) "Installed" else "Needed")
-                SetupItem("Song metadata index", "Created on this device")
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        if (library.installed) "100%" else "${(library.progress.coerceIn(0f, 1f) * 100).toInt()}%",
+                        color = Violet,
+                        fontSize = 38.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.weight(1f))
+                    if (library.busy) {
+                        Text("IN PROGRESS", color = Lilac, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.1.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    }
+                }
+                LinearProgressIndicator(
+                    progress = { if (library.installed) 1f else library.progress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(10.dp).padding(top = 8.dp).clip(CircleShape),
+                    color = Violet,
+                    trackColor = Card
+                )
+                val status = when {
+                    library.busy -> library.progressText ?: "Preparing your library…"
+                    library.paused -> "Paused. Your downloaded files are saved."
+                    library.installed -> "Your offline library is ready."
+                    else -> "Not downloaded yet."
+                }
+                Text(status, color = Lilac, fontSize = 14.sp, modifier = Modifier.padding(top = 13.dp))
+                Text(
+                    when {
+                        library.downloadBytes != null -> "Songs and SoundFonts · ${formatBytes(library.downloadBytes)}"
+                        library.busy -> "Checking the resource size…"
+                        else -> "Songs and SoundFonts · size not available"
+                    },
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                if (library.busy && library.downloadedBytes > 0L) {
+                    val speedText = if (library.downloadSpeedBytesPerSecond > 0L) " · ${formatBytes(library.downloadSpeedBytesPerSecond)}/s" else ""
+                    val remainingText = library.remainingSeconds?.let { " · ${formatDuration(it)} left" }.orEmpty()
+                    Text(
+                        "${formatBytes(library.downloadedBytes)} of ${formatBytes(library.downloadBytes ?: 0L)}$speedText$remainingText",
+                        color = Lilac,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
             }
         }
-        Spacer(Modifier.height(18.dp))
-        Text("MANIFEST HTTPS ADDRESS", color = Lilac, fontSize = 11.sp, letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
-        ManifestUrlField(manifestUrl, onValue = { manifestUrl = it })
-        Text("Enter the complete HTTPS address of your GitHub library-manifest.json file.", color = Lilac, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp))
-        if (library.checkedManifestUrl == manifestUrl.trim() && library.requiredBytes != null) {
-            Text("${library.packageCount} packages · ${formatBytes(library.downloadBytes ?: 0L)} download", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 15.dp))
-            Text("Space needed for download and safe install: ${formatBytes(library.requiredBytes)}", color = Lilac, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
-            library.availableBytes?.let { Text("Free storage: ${formatBytes(it)}", color = Lilac, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp)) }
-            if (library.availableBytes != null && library.availableBytes < library.requiredBytes) {
-                Text("Free space is below the download size.", color = Orange, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-            }
-        }
-        if (library.busy) {
-            LinearProgressIndicator(progress = { library.progress }, modifier = Modifier.fillMaxWidth().padding(top = 18.dp), color = Violet, trackColor = Card)
-            Text(library.progressText.orEmpty(), color = Lilac, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-            val speedText = if (library.downloadSpeedBytesPerSecond > 0L) "${formatBytes(library.downloadSpeedBytesPerSecond)}/s" else "Starting…"
-            val remainingText = library.remainingSeconds?.let { " · ${formatDuration(it)} left" }.orEmpty()
-            Text("${formatBytes(library.downloadedBytes)} / ${formatBytes(library.downloadBytes ?: 0L)} · $speedText$remainingText", color = Lilac, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+
+        if (library.busy && (library.downloadedBytes > 0L || (manifestReady && library.progressText?.contains("asset manifest", ignoreCase = true) != true))) {
+            Spacer(Modifier.height(15.dp))
             PrimaryAction("Pause download") { viewModel.pauseSetup() }
         }
-        if (library.paused) {
-            Text(library.progressText.orEmpty(), color = Lilac, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+
+        library.requiredBytes?.let { required ->
+            val available = library.availableBytes
+            Text(
+                if (available == null) "Space needed for download and safe install: ${formatBytes(required)}"
+                else "Needs ${formatBytes(required)} of phone storage · ${formatBytes(available)} available",
+                color = if (available != null && available < required) Orange else Lilac,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                modifier = Modifier.padding(top = 11.dp, start = 4.dp, end = 4.dp)
+            )
         }
-        library.error?.let { Text(it, color = Orange, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 14.dp)) }
+
+        if (manifestUrl.isBlank()) {
+            Text("This app build has no library manifest configured.", color = Orange, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 12.dp))
+        }
+        library.error?.let { Text(it, color = Orange, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 12.dp)) }
+
         if (!library.busy) {
-            if (library.checkedManifestUrl == manifestUrl.trim() && library.requiredBytes != null && library.availableBytes != null && library.availableBytes >= library.requiredBytes) {
-                val action = when {
-                    library.paused -> "Resume download"
-                    library.installed -> "Download library update"
-                    else -> "Download offline library"
-                }
-                PrimaryAction(action) { viewModel.setup(manifestUrl) }
-            } else if (library.checkedManifestUrl != manifestUrl.trim() || library.requiredBytes == null) {
-                PrimaryAction("Check required download size") { viewModel.inspectManifest(manifestUrl) }
+            val actionLabel = when {
+                manifestUrl.isBlank() -> "DOWNLOAD UNAVAILABLE"
+                !manifestReady && library.error != null -> "RETRY RESOURCE CHECK"
+                !manifestReady -> "CHECKING RESOURCES…"
+                !hasEnoughStorage -> "NOT ENOUGH PHONE STORAGE"
+                library.paused -> "RESUME DOWNLOAD"
+                library.installed -> "UPDATE OFFLINE LIBRARY"
+                else -> "DOWNLOAD ALL RESOURCES"
+            }
+            Button(
+                onClick = { if (manifestReady) viewModel.setup(manifestUrl) else viewModel.inspectManifest(manifestUrl) },
+                enabled = canDownload || (!library.busy && manifestUrl.isNotBlank() && !manifestReady && library.error != null),
+                modifier = Modifier.fillMaxWidth().height(60.dp).padding(top = 14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Violet, disabledContainerColor = Card),
+                shape = RoundedCornerShape(18.dp)
+            ) {
+                Text(actionLabel, color = if (canDownload || (!library.busy && !manifestReady && library.error != null)) Color.White else Lilac, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             }
         }
-        Text("The native MIDI synthesizer still needs its Android engine build before playback is available.", color = Lilac, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp))
+
+        Text(
+            if (library.installed) "Your library stays on this phone for offline use."
+            else "Best on Wi-Fi. You can pause and resume later; completed downloads are kept.",
+            color = Lilac,
+            fontSize = 13.sp,
+            lineHeight = 19.sp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 13.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+
+        GradientCard {
+            Column(Modifier.padding(18.dp)) {
+                Text("READY FOR OFFLINE SINGING", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+                SetupItem("MIDI/KAR song packs", if (library.installed) "Ready" else "Included")
+                SetupItem("SoundFont instruments", if (library.installed) "Ready" else "Included")
+                SetupItem("Song index", if (library.installed) "On this phone" else "Built after download")
+            }
+        }
+        Text("MIDI playback uses the installed SF2 SoundFont and runs offline on this device.", color = Lilac, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp))
     }
 }
 
@@ -549,28 +879,7 @@ private fun SearchField(value: String, onValue: (String) -> Unit) {
 }
 
 @Composable
-private fun ManifestUrlField(value: String, onValue: (String) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(17.dp)).background(Card).padding(horizontal = 15.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        BasicTextField(
-            value = value,
-            onValueChange = onValue,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Uri),
-            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
-            modifier = Modifier.fillMaxWidth().padding(start = 8.dp),
-            decorationBox = { inner ->
-                if (value.isEmpty()) Text("https://github.com/hillman3948-cyber/JKTV-Offline/releases/latest/download/library-manifest.json", color = Lilac, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                inner()
-            }
-        )
-    }
-}
-
-@Composable
-private fun SongCard(song: SongEntity, onFavorite: () -> Unit, onAdd: (String) -> Unit) {
+private fun SongCard(song: SongEntity, onFavorite: () -> Unit, onAdd: (String) -> Unit, onPlay: () -> Unit) {
     var assignSinger by rememberSaveable { mutableStateOf(false) }
     var singer by rememberSaveable { mutableStateOf("Guest") }
     if (assignSinger) {
@@ -601,9 +910,15 @@ private fun SongCard(song: SongEntity, onFavorite: () -> Unit, onAdd: (String) -
             Text(song.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(song.artist.ifBlank { "Unknown artist" }, color = Lilac, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        IconButton(onClick = onPlay, modifier = Modifier.size(44.dp)) { Icon(Icons.Rounded.PlayArrow, "Play song", tint = Violet) }
         IconButton(onClick = onFavorite, modifier = Modifier.size(48.dp)) { Icon(if (song.favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, "Toggle favorite", tint = if (song.favorite) Orange else Lilac) }
         IconButton(onClick = { assignSinger = true }, modifier = Modifier.size(48.dp)) { Icon(Icons.Rounded.Add, "Add to singer queue", tint = Violet) }
     }
+}
+
+private fun formatPlaybackTime(milliseconds: Long): String {
+    val seconds = (milliseconds.coerceAtLeast(0L) / 1000L)
+    return "%d:%02d".format(seconds / 60, seconds % 60)
 }
 
 @Composable
