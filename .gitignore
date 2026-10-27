@@ -13,3 +13,6 @@ build/assets/
 *.apk
 *.aab
 
+
+.kotlin/
+**/node_modules/

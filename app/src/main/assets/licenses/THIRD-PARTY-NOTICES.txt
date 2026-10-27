@@ -2,3 +2,5 @@ JKTV Offline Karaoke includes fluidsynth-kmp 1.1.0, which bundles FluidSynth 2.5
 The fluidsynth-kmp wrapper is licensed under Apache License 2.0; see FLUIDSYNTH-KMP-APACHE-2.0.txt.
 The bundled FluidSynth native library is licensed under GNU Lesser General Public License 2.1; see FLUIDSYNTH-LGPL-2.1.txt.
 Upstream projects: https://github.com/kotlinds/fluidsynth-kmp and https://github.com/FluidSynth/fluidsynth
+
+Java Native Access (JNA) 5.15.0 Android AAR provides MIDI C API access to the same bundled FluidSynth. JNA is dual licensed LGPL 2.1 or later / Apache 2.0; see JNA-LICENSE.txt. Upstream: https://github.com/java-native-access/jna

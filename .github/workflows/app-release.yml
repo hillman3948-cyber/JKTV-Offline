@@ -50,9 +50,11 @@ jobs:
             exit 1
           fi
           echo "name=$version" >> "$GITHUB_OUTPUT"
+          # Continue above the locally prepared build 20; run_number increases per workflow.
+          echo "code=$((20 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
 
       - name: Build release APK
-        run: gradle --no-daemon :app:assembleRelease -PversionName='${{ steps.version.outputs.name }}' -PversionCode='${{ github.run_number }}'
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease -PjktvBuildDirectory=build -PversionName='${{ steps.version.outputs.name }}' -PversionCode='${{ steps.version.outputs.code }}'
 
       - name: Sign and verify APK
         id: sign
@@ -63,18 +65,21 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           VERSION: ${{ steps.version.outputs.name }}
-          VERSION_CODE: ${{ github.run_number }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
         run: |
           set -euo pipefail
           keystore="$RUNNER_TEMP/jktv-release.keystore"
           aligned="$RUNNER_TEMP/jktv-aligned.apk"
           apk="JKTV-v${VERSION}.apk"
+          tools="$ANDROID_HOME/build-tools/35.0.0"
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keystore"
-          zipalign -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk "$aligned"
-          apksigner sign --ks "$keystore" --ks-key-alias "$KEY_ALIAS" \
+          "$tools/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk "$aligned"
+          "$tools/apksigner" sign --ks "$keystore" --ks-key-alias "$KEY_ALIAS" \
             --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD \
             --out "$apk" "$aligned"
-          apksigner verify --verbose "$apk"
+          "$tools/apksigner" verify --verbose "$apk"
+          # The existing public releases use this certificate; reject accidental key changes.
+          "$tools/apksigner" verify --print-certs "$apk" | grep -qi 'bf9e3568126ed487c039b3708c094b42ffa8b302fd4caafb255e30fabaa3dd33'
           sha256sum "$apk" > "$apk.sha256"
           checksum="$(cut -d ' ' -f1 "$apk.sha256")"
           printf '{\n  "packageName": "com.jktv.offline",\n  "versionName": "%s",\n  "versionCode": %s,\n  "apk": "%s",\n  "sha256": "%s"\n}\n' \
@@ -88,5 +93,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.name }}
           APK: ${{ steps.sign.outputs.apk }}
         run: |
-          gh release create "app-v${VERSION}" "$APK" "$APK.sha256" app-version.json \
-            --title "JKTV ${VERSION}" --generate-notes --prerelease
+          set -euo pipefail
+          notes="release_notes_v${VERSION}.md"
+          args=(--title "JKTV ${VERSION}")
+          if [[ -f "$notes" ]]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
+          if [[ "$VERSION" == *-* ]]; then args+=(--prerelease); fi
+          gh release create "app-v${VERSION}" "$APK" "$APK.sha256" app-version.json "${args[@]}"

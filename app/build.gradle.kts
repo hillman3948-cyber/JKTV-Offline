@@ -5,12 +5,15 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+layout.buildDirectory.set(file(providers.gradleProperty("jktvBuildDirectory")
+    .orElse("${System.getProperty("java.io.tmpdir")}/jktv-offline-build/app").get()))
+
 android {
     namespace = "com.jktv.offline"
     compileSdk = 35
 
-    val configuredVersionName = providers.gradleProperty("versionName").orElse("0.4.0").get()
-    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("11").get().toInt()
+    val configuredVersionName = providers.gradleProperty("versionName").orElse("0.4.4").get()
+    val configuredVersionCode = providers.gradleProperty("versionCode").orElse("20").get().toInt()
     val repositoryValue = providers.gradleProperty("jktvGithubRepository")
         .orElse(providers.environmentVariable("GITHUB_REPOSITORY"))
         .orElse("hillman3948-cyber/JKTV-Offline")
@@ -22,8 +25,11 @@ android {
         .get().trim()
 
     defaultConfig {
+        // These are the ABIs with a complete FluidSynth JNI implementation.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         applicationId = providers.gradleProperty("jktvApplicationId")
             .orElse("com.jktv.offline").get()
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 26
         targetSdk = 35
         versionCode = configuredVersionCode
@@ -41,6 +47,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 kotlin {
@@ -53,6 +62,8 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.11.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.test:runner:1.6.1")
+    androidTestImplementation("junit:junit:4.13.2")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -65,9 +76,13 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.5")
     implementation("androidx.room:room-ktx:2.8.5")
     implementation("dev.kotlinds:fluidsynth-kmp:1.1.0")
+    // Android AAR supplies native dispatch for the MIDI APIs omitted by the pinned wrapper.
+    implementation("net.java.dev.jna:jna:5.15.0@aar")
     ksp("androidx.room:room-compiler:2.8.5")
-    testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("com.google.zxing:core:3.5.3")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
 
 configurations.configureEach {

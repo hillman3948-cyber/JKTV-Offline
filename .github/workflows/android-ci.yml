@@ -37,7 +37,7 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Build and run available checks
-        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -PjktvBuildDirectory=build
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

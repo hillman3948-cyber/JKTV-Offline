@@ -9,21 +9,20 @@ import org.junit.Test
 
 class KaraokeMidiParserTest {
     @Test
-    fun sameNameLrcOverridesMidiAndAppliesOffsetAndMultipleTimestamps() {
+    fun sameNameLrcResolvesThroughSyncEngineWithOffsetAndMultipleTimestamps() {
         val directory = Files.createTempDirectory("jktv-lrc-test").toFile()
         try {
             val midi = File(directory, "Song.mid").apply { writeBytes(minimalMidi()) }
             File(directory, "Song.lrc").writeText(
-                "[ar:Test Artist]\n[offset:-100]\n[00:01.2][00:03.40]First line\n[00:04.05]Second line\n",
+                "[ar:Test Artist]\n[offset:100]\n[00:01.2][00:03.40]First line\n[00:04.05]Second line\n",
                 Charsets.UTF_8
             )
 
-            val result = KaraokeMidiParser.parse(midi)
+            val result = LyricsSyncEngine.resolveForSong(null, 0L, midi, KaraokeMidiParser.parse(midi))
 
-            assertTrue(result.hasLyrics)
-            assertTrue(result.hasEventTiming)
-            assertEquals(listOf("First line", "First line", "Second line"), result.lyrics.map { it.text })
-            assertEquals(listOf(1_100L, 3_300L, 3_950L), result.lyrics.map { it.timeMs })
+            assertEquals(SyncSourceType.EXTERNAL_LRC, result.sourceType)
+            assertEquals(listOf("First line", "First line", "Second line"), result.lyricLines.map { it.text })
+            assertEquals(listOf(1_100L, 3_300L, 3_950L), result.lyricLines.map { it.startMs })
         } finally {
             directory.deleteRecursively()
         }

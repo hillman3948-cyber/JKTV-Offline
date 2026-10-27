@@ -1,0 +1,34 @@
+[hidden]{display:none!important}
+.chooser{min-height:85vh;display:flex;flex-direction:column;justify-content:center;gap:24px;max-width:780px;margin:auto;text-align:center;padding:24px}
+.chooser h1{font-size:clamp(30px,5vw,56px);line-height:1.15}
+.chooser p{font-size:clamp(16px,2vw,22px);color:#bdc9df}
+.choice{min-height:96px;border-radius:20px;font-size:clamp(22px,3vw,36px)}
+.choice:focus-visible{outline:3px solid white;outline-offset:5px}
+html.stage-mode,body.stage-mode{width:100%;height:100%;overflow:hidden;padding:0;margin:0;max-width:none;background:#050813}
+.stage{position:fixed;top:0;right:0;bottom:0;left:0;inset:0;overflow:hidden;isolation:isolate;color:#fff;background:radial-gradient(ellipse at 50% 60%,#121b34,#060a15 70%);--stage-scrim:.4}
+.stage-background,#stageCanvas,.stage-scrim{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;width:100%;height:100%;pointer-events:none}
+.stage-background{z-index:0;overflow:hidden}
+.stage-background video,.stage-background img{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity 180ms ease}
+#stageCanvas{z-index:1}
+.stage-scrim{z-index:2;background:rgba(0,0,0,var(--stage-scrim))}
+.stage-info{position:absolute;z-index:4;left:5%;right:5%;top:4.5%;display:flex;flex-direction:column;gap:.5em;pointer-events:none;line-height:1.25}
+#stageTitle{font-size:clamp(16px,2.1vh,38px);font-weight:600;color:#e9eef7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.01em}
+#stageSinger{font-size:clamp(14px,1.7vh,30px);font-weight:500;color:#bcc8dd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#countdown{position:absolute;z-index:4;left:5%;right:5%;top:13%;height:1.5em;text-align:center;font-size:clamp(18px,2.6vh,46px);font-weight:700;letter-spacing:.06em;color:#fff;pointer-events:none}
+.stage-center{position:absolute;z-index:3;left:5%;right:5%;top:21%;bottom:22%;display:flex;flex-direction:column;justify-content:center;align-items:stretch;pointer-events:none}
+.stage-center[data-position=TOP]{justify-content:flex-start}
+.stage-center[data-position=BOTTOM]{justify-content:flex-end}
+.lyric-line{display:block;width:100%;overflow:visible;flex-shrink:0}
+.lyric-line text{paint-order:stroke fill;stroke-linejoin:round;white-space:pre}
+#stageConnection{position:absolute;z-index:5;left:5%;bottom:4%;padding:.5em .8em;border-radius:8px;background:#101a2ee0;color:#d7e3f6;font-size:clamp(13px,1.6vh,26px)}
+@media(prefers-reduced-motion:reduce){.stage-background video,.stage-background img{transition:none}}
+
+.stage-audio-control{position:absolute;z-index:8;right:4%;bottom:4%;padding:12px 18px;max-width:70%;font:600 16px Arial,sans-serif;color:#fff;background:#172640;border:1px solid #6481a6;border-radius:8px}
+
+/* Fallbacks for TV engines predating CSS clamp and flex gap. */
+@supports not (font-size:clamp(16px,2vh,30px)){.chooser h1{font-size:42px}.chooser p{font-size:20px}.choice{font-size:30px}#stageTitle{font-size:2.1vh}#stageSinger{font-size:1.7vh}#countdown{font-size:2.6vh}#stageConnection{font-size:1.6vh}}
+
+.guest-qr{position:absolute;z-index:5;top:3%;right:3%;padding:.8vh;border-radius:1vh;background:rgba(10,17,32,.78);display:flex;flex-direction:column;align-items:center;pointer-events:none}
+.guest-qr img{display:block;width:14vh;height:14vh;background:white}
+.guest-qr span{font:700 1.35vh Arial,sans-serif;letter-spacing:.06em;color:#fff;margin-top:.65vh;white-space:nowrap}
+.has-guest-qr .stage-info{right:calc(3% + 18vh)}
